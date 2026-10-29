@@ -111,8 +111,8 @@ function initRenderer() {
   document.body.appendChild(r.domElement);
   G.renderer = r;
   G.scene = new THREE.Scene();
-  G.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 1600);
-  G.scene.fog = new THREE.Fog(0x9cc8f0, 200, 750);
+  G.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, G.mobile ? 700 : 1600);
+  G.scene.fog = G.mobile ? new THREE.Fog(0x9cc8f0, 140, 520) : new THREE.Fog(0x9cc8f0, 220, 800);
   G.hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a6a3a, 0.55);
   G.scene.add(G.hemi);
   G.sun = new THREE.DirectionalLight(0xfff1d6, 1.0);
@@ -180,9 +180,10 @@ function updateDayNight(dt) {
   if (elev < 0) { G.sun.color.set('#8aa0d8'); G.sun.intensity = 0.18; G.sun.position.set(px - sx * 250, 200, pz - 150); }
   G.hemi.intensity = 0.25 + day * 0.4;
   G.amb.intensity = 0.12 + (1 - day) * 0.08;
-  G.sunDisc.position.set(G.camera.position.x + Math.cos(az) * 1100, Math.sin(az) * 1100 - 60, G.camera.position.z + sz * 1100);
+  const sd = G.camera.far * 0.8;
+  G.sunDisc.position.set(G.camera.position.x + Math.cos(az) * sd, Math.sin(az) * sd - 60, G.camera.position.z + sz * sd);
   G.sunDisc.visible = elev > -0.05;
-  for (const m of World.nightMats) m.emissiveIntensity = G.night * 0.95;
+  for (const m of World.nightMats) m.emissiveIntensity = G.night * 0.85;
 }
 
 // ---------- Camera ----------

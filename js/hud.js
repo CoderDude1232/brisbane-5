@@ -62,8 +62,13 @@ const HUD = {
 
     const sub = World.suburbAt(P.x, P.z)[0];
     const br = World.onBridge(P.x, P.z);
-    const area = br && World.isWater(P.x, P.z) ? br.name : sub;
+    let lm = null;
+    for (const l of World.labels) if (Math.abs(l.x - P.x) < l.r && Math.abs(l.z - P.z) < l.r && Math.hypot(l.x - P.x, l.z - P.z) < l.r) { lm = l.name; break; }
+    const area = br && World.isWater(P.x, P.z) ? br.name : lm || sub;
     if (area !== this.lastArea) { this.lastArea = area; this.areaEl.textContent = area; this.areaEl.style.opacity = 1; this.areaT = 3.5; }
+    const stName = World.streetAt(P.x, P.z);
+    const line = [stName, lm || (br && World.isWater(P.x, P.z)) ? sub : null].filter(Boolean).join('  |  ') || sub;
+    if (line !== this.lastStreet) { this.lastStreet = line; $('street').textContent = line; }
     this.drawMinimap(t, dt);
   },
 
@@ -125,6 +130,15 @@ const HUD = {
       g.beginPath(); g.arc(x, y, b.s * dpr, 0, TAU); g.fill(); g.stroke();
       if (b.label) { g.fillStyle = '#000'; g.font = `bold ${9 * dpr}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.label, x, y + 0.5); }
     }
+    // Landmark names, kept upright
+    g.font = `600 ${9.5 * dpr}px "Barlow Condensed", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const l of World.labels) {
+      if (l.name.startsWith('CityCat')) continue;
+      const [x, y] = toScreen(l.x, l.z);
+      if (Math.hypot(x, y) > R - 22) continue;
+      g.fillStyle = 'rgba(0,0,0,0.75)'; g.fillText(l.name, x + dpr, y + dpr);
+      g.fillStyle = '#ffe9a6'; g.fillText(l.name, x, y);
+    }
     // Player arrow
     const h = P.car ? P.car.h : P.h;
     g.translate(0, R * 0.2);
@@ -156,6 +170,13 @@ const HUD = {
       ['WEST END', -280, 380], ['WOOLLOONGABBA', 260, 220], ['MILTON', -440, 0], ['PADDINGTON', -420, -300], ['MT COOT-THA', MT.x, MT.z], ['TOOWONG', -720, -60],
       ['SPRING HILL', -110, -330], ['NEWSTEAD', 420, -560], ['HERSTON', -120, -640], ['BULIMBA', 820, -60], ['ST LUCIA', -700, 360], ['EAST BRISBANE', 480, 280]];
     for (const [n, x, z] of labels) { const [a, b] = at(x, z); g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillText(n, a + 1, b + 1); g.fillStyle = '#f2f2f2'; g.fillText(n, a, b); }
+    g.font = '600 10px "Barlow Condensed", sans-serif';
+    for (const l of World.labels) {
+      if (l.name.startsWith('CityCat')) continue;
+      const [a, b] = at(l.x, l.z);
+      g.fillStyle = '#ffd23a'; g.beginPath(); g.arc(a, b, 2.2, 0, TAU); g.fill();
+      if (S > 700) { g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillText(l.name, a + 1, b - 4); g.fillStyle = '#ffe9a6'; g.fillText(l.name, a, b - 5); }
+    }
     const t = G.t;
     for (const b of this.blips(t)) {
       const [x, y] = at(b.x, b.z);

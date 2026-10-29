@@ -42,14 +42,41 @@ const SUBURBS = [
 
 const BRIDGE_NAMES = [
   ['Story Bridge', 240, -240], ['Captain Cook Bridge', 120, 150], ['Victoria Bridge', -60, 230],
-  ['Go Between Bridge', -240, 230], ['William Jolly Bridge', -180, 235],
-  ['Kangaroo Point Bridge', 150, -20], ['Merivale Bridge', -400, 190],
+  ['Go Between Bridge', -240, 230], ['William Jolly Bridge', -360, 200],
+  ['Kangaroo Point Bridge', 150, -20], ['Merivale Bridge', -480, 180],
   ['Walter Taylor Bridge', -900, 50], ['Gateway Bridge', 1000, -200],
   ['Bulimba Ferry Bridge', 560, -60], ['Breakfast Creek Bridge', 700, -400],
   ['Kurilpa Bridge', -150, 230], ['Goodwill Bridge', 60, 200], ['Green Bridge', -700, 100],
   ['Indooroopilly Toll Bridge', -840, 60], ['Teneriffe Crossing', 600, -380], ['New Farm Crossing', 340, -60],
   ['Hawthorne Crossing', 480, 120], ['Newstead Crossing', 820, -340], ['Norman Creek Bridge', 360, 0],
 ];
+
+// Real street names where the grid lines up with the real thing; Aussie-flavoured fallbacks elsewhere.
+// [dir, line coordinate, from, to, name]  dir 'H' = constant z, 'V' = constant x
+const STREETS = [
+  ['H', 120, -260, 160, 'Alice St'], ['H', 60, -260, 160, 'Margaret St'], ['H', 0, -260, 160, 'Elizabeth St'],
+  ['H', -60, -260, 160, 'Queen St'], ['H', -120, -260, 160, 'Adelaide St'], ['H', -180, -260, 160, 'Ann St'],
+  ['H', -240, -260, 160, 'Turbot St'], ['H', -300, -400, 140, 'Wickham Tce'],
+  ['V', -240, -300, 200, 'North Quay'], ['V', -180, -300, 200, 'William St'], ['V', -120, -300, 200, 'George St'],
+  ['V', -60, -300, 200, 'Albert St'], ['V', 0, -300, 200, 'Edward St'], ['V', 60, -300, 200, 'Creek St'],
+  ['V', 120, -300, 200, 'Eagle St'], ['V', 240, -340, -160, 'Bradfield Hwy'],
+  ['H', -300, 140, 400, 'Ann St'], ['H', -360, 140, 400, 'Wickham St'], ['V', 180, -560, -300, 'Brunswick St'],
+  ['V', 240, -560, -320, 'Ballow St'], ['H', -420, 140, 420, 'Gipps St'], ['V', 300, -160, 260, 'Main St'],
+  ['H', 240, -40, 520, 'Stanley St'], ['H', 360, -400, 460, 'Vulture St'], ['V', -300, 220, 640, 'Montague Rd'],
+  ['V', -240, 260, 640, 'Boundary St'], ['H', 300, -260, 0, 'Grey St'], ['V', -60, 400, 1020, 'Annerley Rd'],
+  ['V', 180, 420, 1020, 'Ipswich Rd'], ['V', 480, 300, 1020, 'Logan Rd'], ['H', 420, 440, 1020, 'Old Cleveland Rd'],
+  ['H', 0, -960, -280, 'Milton Rd'], ['H', 60, -1020, -500, 'Coronation Dr'], ['H', -300, -680, -400, 'Given Tce'],
+  ['H', -240, -680, -260, 'Caxton St'], ['V', -180, -1020, -320, 'Kelvin Grove Rd'], ['V', 60, -1020, -600, 'Lutwyche Rd'],
+  ['H', -480, 560, 1020, 'Kingsford Smith Dr'], ['H', -60, 420, 560, 'Merthyr Rd'], ['V', 840, -240, 160, 'Oxford St'],
+  ['V', -420, -600, -120, 'Latrobe Tce'], ['H', -600, -600, -200, 'Waterworks Rd'], ['V', 420, -1020, -480, 'Breakfast Creek Rd'],
+  ['H', -120, -700, -300, 'Petrie Tce'], ['V', 120, -900, -480, 'Bowen Bridge Rd'], ['H', 420, -800, -360, 'Sir Fred Schonell Dr'],
+];
+const STREET_FILL = ['Wattle St', 'Banksia Ave', 'Jacaranda St', 'Poinciana Ave', 'Bunya St', 'Macadamia Ave', 'Mango St',
+  'Frangipani Ct', 'Kookaburra St', 'Possum Pl', 'Grevillea St', 'Moreton St', 'Bottlebrush Ave', 'Cavendish Rd',
+  'Hawthorne Rd', 'Musgrave Rd', 'Enoggera Tce', 'Hardgrave Rd', 'Sylvan Rd', 'Jephson St', 'High St', 'Lambert St',
+  'Shafston Ave', 'Wynnum Rd', 'Lytton Rd', 'Fairfield Rd', 'Dornoch Tce', 'Kent St', 'Brisbane St', 'Arthur St',
+  'Heal St', 'Harcourt St', 'Bowen Tce', 'Oxlade Dr', 'Sydney St', 'Mowbray Tce', 'Lytton Rd', 'Riding Rd',
+  'Ferry Rd', 'Hale St', 'Russell St', 'Melbourne St', 'Merivale St', 'Glenelg St', 'Gladstone Rd', 'Dutton St'];
 
 const World = {
   mask: new Uint8Array(MW * MW),
@@ -131,6 +158,19 @@ const World = {
     const out = [];
     for (let c = t; c !== s; c = prev[c]) out.push([(c / NL) | 0, c % NL]);
     return out.reverse();
+  },
+  streetAt(x, z) {
+    const vi = Math.round((x - ORIGIN) / GRID), hj = Math.round((z - ORIGIN) / GRID);
+    const dv = Math.abs(x - lineC(vi)), dh = Math.abs(z - lineC(hj));
+    const onV = dv < 10 && (this.edge(vi, Math.floor((z - ORIGIN) / GRID), vi, Math.floor((z - ORIGIN) / GRID) + 1) > 0);
+    const onH = dh < 10 && (this.edge(Math.floor((x - ORIGIN) / GRID), hj, Math.floor((x - ORIGIN) / GRID) + 1, hj) > 0);
+    let dir = null;
+    if (onV && onH) dir = dv < dh ? 'V' : 'H'; else if (onV) dir = 'V'; else if (onH) dir = 'H';
+    if (!dir) return null;
+    const line = dir === 'V' ? lineC(vi) : lineC(hj), along = dir === 'V' ? z : x;
+    for (const s of STREETS) if (s[0] === dir && s[1] === line && along >= s[2] && along <= s[3]) return s[4];
+    const seg = Math.floor((along + HALF) / 300);
+    return STREET_FILL[((dir === 'V' ? vi * 7 : hj * 13 + 5) + seg * 3) % STREET_FILL.length];
   },
   suburbAt(x, z) {
     let best = SUBURBS[0], bd = 1e18;

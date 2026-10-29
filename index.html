@@ -37,8 +37,10 @@
   #hp { background: #4caf50; } #hp.low { background: #e04040; }
   #ar { background: #3a7bff; }
   #area, #veh { position: absolute; right: 26px; font-family: 'Anton', Impact, sans-serif; text-shadow: var(--hud-shadow); transition: opacity .6s; opacity: 0; text-align: right; }
-  #area { bottom: calc(26px + var(--sb)); font-size: 34px; }
-  #veh { bottom: 70px; font-size: 24px; color: #e7e7e7; }
+  #area { bottom: calc(50px + var(--sb)); font-size: 34px; }
+  #street { position: absolute; right: calc(26px + var(--sr)); bottom: calc(22px + var(--sb)); font-size: 20px; font-weight: 700; text-shadow: var(--hud-shadow); color: #e8e8e8; text-align: right; }
+  body.touch #street { right: auto; left: 50%; transform: translateX(-50%); bottom: auto; top: calc(56px + var(--st)); font-size: 14px; white-space: nowrap; }
+  #veh { bottom: calc(94px + var(--sb)); font-size: 24px; color: #e7e7e7; }
   #radio { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; font-family: 'Anton', Impact, sans-serif; font-size: 26px; color: var(--gold); text-shadow: var(--hud-shadow); transition: opacity .6s; opacity: 0; }
   #radio small { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; color: #eee; }
   #msg { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); width: min(720px, max(300px, calc(100vw - 540px))); text-align: center; font-size: 24px; font-weight: 700; text-shadow: var(--hud-shadow); transition: opacity .4s; }
@@ -92,8 +94,8 @@
   body.touch #topright { top: calc(8px + var(--st)); right: calc(12px + var(--sr)); }
   body.touch #clock { font-size: 13px; } body.touch #money { font-size: 24px; } body.touch #weapon { font-size: 16px; } body.touch #stars { font-size: 18px; }
   body.touch #area, body.touch #veh { left: 50%; right: auto; transform: translateX(-50%); text-align: center; white-space: nowrap; }
-  body.touch #area { bottom: auto; top: calc(66px + var(--st)); font-size: 20px; }
-  body.touch #veh { bottom: auto; top: calc(92px + var(--st)); font-size: 16px; }
+  body.touch #area { bottom: auto; top: calc(74px + var(--st)); font-size: 20px; }
+  body.touch #veh { bottom: auto; top: calc(100px + var(--st)); font-size: 16px; }
   body.touch #radio { font-size: 18px; top: calc(8px + var(--st)); } body.touch #radio small { font-size: 13px; }
   body.touch #timer { top: calc(110px + var(--st)); font-size: 28px; }
   body.touch #flash { font-size: 22px; }
@@ -150,6 +152,7 @@
   <div id="radio"></div>
   <div id="veh"></div>
   <div id="area"></div>
+  <div id="street"></div>
   <div id="timer"></div>
   <div id="flash"></div>
   <div id="obj"></div>
@@ -183,6 +186,8 @@
 <script src="js/util.js"></script>
 <script src="js/world.js"></script>
 <script src="js/worldBuild.js"></script>
+<script src="js/landmarks.js"></script>
+<script src="js/props.js"></script>
 <script src="js/models.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/effects.js"></script>

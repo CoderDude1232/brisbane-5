@@ -130,12 +130,12 @@ class Vehicle {
     this.z = clamp(this.z, -HALF + 5, HALF - 5);
 
     // Buildings
-    let nx = 0, nz = 0, hit = false;
+    let nx = 0, nz = 0, hit = false, soft = true;
     for (const o of this.offs) {
       const p = { x: this.x + fx * o, z: this.z + fz * o };
       const ox = p.x, oz = p.z;
       const res = collideCircle(p, this.r, this.y);
-      if (res) { this.x += p.x - ox; this.z += p.z - oz; nx += res.nx; nz += res.nz; hit = true; }
+      if (res) { this.x += p.x - ox; this.z += p.z - oz; nx += res.nx; nz += res.nz; hit = true; if (!res.soft) soft = false; }
     }
     if (hit) {
       const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
@@ -144,7 +144,7 @@ class Vehicle {
         this.vx += nx * imp * 1.25; this.vz += nz * imp * 1.25;
         this.vx *= 0.9; this.vz *= 0.9;
         if (imp > 6) {
-          this.damage((imp - 6) * 14, this.driver === 'player' ? 'player' : null);
+          if (!soft) this.damage((imp - 6) * 14, this.driver === 'player' ? 'player' : null);
           Sound.crash(imp / 25, Math.hypot(this.x - Player.x, this.z - Player.z));
           FX.sparks(this.x + fx * this.spec.L / 2, this.y + 0.6, this.z + fz * this.spec.L / 2, 8);
           if (this.driver === 'player') G.shake = Math.max(G.shake, imp / 40);
@@ -346,7 +346,7 @@ function toTraffic(v) {
 
 function collideCircle(p, r, y) {
   const boxes = World.hash.query(p.x - r, p.z - r, p.x + r, p.z + r, collideCircle._tmp);
-  let hit = false, nx = 0, nz = 0;
+  let hit = false, nx = 0, nz = 0, soft = true;
   for (const b of boxes) {
     if (y !== undefined && (y + 0.3 > b.maxY || y + 1.5 < b.minY)) continue;
     const cx = clamp(p.x, b.minX, b.maxX), cz = clamp(p.z, b.minZ, b.maxZ);
@@ -360,10 +360,11 @@ function collideCircle(p, r, y) {
       else if (m === t) { ux = 0; uz = -1; pen = t + r; } else { ux = 0; uz = 1; pen = bt + r; }
     }
     p.x += ux * pen; p.z += uz * pen; nx += ux; nz += uz; hit = true;
+    if (b.tag !== 'prop') soft = false;
   }
   if (!hit) return null;
   const l = Math.hypot(nx, nz) || 1;
-  return { nx: nx / l, nz: nz / l };
+  return { nx: nx / l, nz: nz / l, soft };
 }
 collideCircle._tmp = [];
 

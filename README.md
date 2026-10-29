@@ -18,7 +18,13 @@ You can't open the file directly from disk because browsers block the scripts it
 - **The Brown Snake.** The Brisbane River winds past Toowong, around the CBD peninsula, Kangaroo Point and New Farm, then out past Hamilton. CityCat ferries run along it. If you drive into it you sink.
 - **26 river crossings**, including the **Story Bridge** with its steel cantilever truss (lit up at night), Captain Cook, Victoria, Go Between, Kurilpa and Walter Taylor bridges.
 - **Suburbs:** CBD towers, Fortitude Valley neon, South Bank, West End, Woolloongabba, Paddington, New Farm, Milton, Toowong and more. Each suburb has a mix of buildings: glass towers, Queenslanders on stilts with tin roofs and verandahs, Hills Hoists, backyard pools and jacarandas in bloom.
-- **Landmarks:** the Wheel of Brisbane, Streets Beach and the BRISBANE sign at South Bank; Queen Street Mall; City Hall and King George Square; Suncorp Stadium (in maroon); the Gabba; the XXXX Brewery in Milton; the Kangaroo Point Cliffs; the RBWH; Roma St police HQ. **Mt Coot-tha**, with its TV towers and lookout, is drivable.
+- **Real landmarks** (about 40, placed roughly where they stand):
+  - **CBD:** Brisbane Skytower (with its sky pool), 1 William St, Infinity Tower (lit crown), Soleil, Aurora, Riparian Plaza, Waterfront Place, 480 Queen St (diagrid), Brisbane Square (coloured boxes), and Queen's Wharf with the Sky Deck and the Neville Bonner Bridge.
+  - **Heritage:** the Treasury Building, Customs House (copper dome), City Hall and King George Square, Anzac Square and the Shrine of Remembrance, Central and Roma St stations, St Stephen's Cathedral, Parliament House and the City Botanic Gardens, and the Old Windmill.
+  - **South Bank:** GOMA, the State Library, the Queensland Museum, QPAC, the Wheel of Brisbane, Streets Beach, the BRISBANE sign, the Nepal Peace Pagoda, the Arbour and the Convention Centre.
+  - **Around town:** the Story Bridge Hotel, Kangaroo Point Cliffs, Howard Smith Wharves, Chinatown Mall, Brisbane Powerhouse, the Teneriffe woolstores, the Newstead gasworks, the Ekka, the Breakfast Creek Hotel, Eat Street, the Regatta Hotel, UQ's Great Court, Indro, Lone Pine, Mt Coot-tha Botanic Gardens, Suncorp Stadium, the Gabba and the XXXX Brewery.
+  - **Bridges:** the Kurilpa masts, the Kangaroo Point green bridge, the art-deco pylons on William Jolly / Victoria / Go Between, and the Story Bridge's steel truss.
+- **Street level:** real CBD street names (the ladies' and gents' grid of Queen, Adelaide, Ann, George, Albert, Edward, Eagle and more) shown in the HUD. Street lights, traffic signals, zebra crossings, footpath awnings, TransBlink bus stops, power poles and wires in the suburbs, wheelie bins, Hills Hoists, rainwater tanks and fences. Queenslanders, post-war brick homes and new builds. Mangroves along the river, the Riverwalk, and CityCat terminals.
 - **Wildlife:** bin chickens (ibis) wander the parks. It's spring, so magpies swoop you in the suburbs.
 - **Day/night cycle** (one game day is 16 minutes): office windows and Valley neon light up after dark.
 
@@ -51,7 +57,9 @@ You can't open the file directly from disk because browsers block the scripts it
 | File | What it does |
 | --- | --- |
 | `js/world.js` | River, road grid, bridges, suburbs, path-finding (pure data) |
-| `js/worldBuild.js` | Merges the city into chunked meshes, plus colliders, landmarks and the minimap image |
+| `js/worldBuild.js` | Merges the city into chunked meshes: roads, generic buildings, houses, colliders, minimap image |
+| `js/landmarks.js` | Real Brisbane buildings |
+| `js/props.js` | Street furniture, riverbanks, CityCat terminals |
 | `js/models.js` | Low-poly people, cars, birds and the helicopter |
 | `js/vehicles.js` | Car physics, traffic AI, police pursuit AI, collisions |
 | `js/peds.js` | Pedestrians, ibis, magpies |

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grand Theft Ute: Brisvegas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+    --maroon: #7a1f3d; --gold: #ffd23a; --jacaranda: #9a78db; --ink: #f4f4f4;
+    --hud-shadow: 0 2px 0 #000, 0 0 6px rgba(0,0,0,.8);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f1a; color: var(--ink); font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; user-select: none; }
+  canvas { display: block; }
+  #hud { display: none; position: fixed; inset: 0; pointer-events: none; }
+  #topright { position: absolute; top: calc(18px + var(--st)); right: calc(22px + var(--sr)); text-align: right; text-shadow: var(--hud-shadow); }
+  #clock { font-size: 18px; opacity: .85; }
+  #money { font-family: 'Anton', Impact, sans-serif; font-size: 34px; color: #e9f5e0; letter-spacing: 1px; }
+  #money::first-letter { color: #79c94a; }
+  #weapon { font-size: 22px; font-weight: 700; text-transform: uppercase; }
+  #weapon span { color: var(--gold); }
+  #stars { font-size: 30px; letter-spacing: 2px; margin-top: 2px; }
+  #stars i { font-style: normal; color: rgba(255,255,255,.18); -webkit-text-stroke: 1px rgba(0,0,0,.6); }
+  #stars i.on { color: #fff; }
+  #stars i.dim { color: rgba(255,255,255,.35); }
+  #stars.pulse { animation: pulse .6s 3; }
+  @keyframes pulse { 50% { transform: scale(1.25); } }
+  #mmwrap { position: absolute; left: calc(22px + var(--sl)); bottom: calc(22px + var(--sb)); width: 220px; }
+  #minimap { width: 220px; height: 220px; border-radius: 50%; box-shadow: 0 0 0 3px rgba(0,0,0,.6), 0 6px 20px rgba(0,0,0,.5); }
+  .bars { display: flex; gap: 4px; margin-top: 8px; }
+  .bar { flex: 1; height: 8px; background: rgba(0,0,0,.55); border: 1px solid rgba(0,0,0,.8); }
+  .bar div { height: 100%; transition: width .2s; }
+  #hp { background: #4caf50; } #hp.low { background: #e04040; }
+  #ar { background: #3a7bff; }
+  #area, #veh { position: absolute; right: 26px; font-family: 'Anton', Impact, sans-serif; text-shadow: var(--hud-shadow); transition: opacity .6s; opacity: 0; text-align: right; }
+  #area { bottom: calc(26px + var(--sb)); font-size: 34px; }
+  #veh { bottom: 70px; font-size: 24px; color: #e7e7e7; }
+  #radio { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; font-family: 'Anton', Impact, sans-serif; font-size: 26px; color: var(--gold); text-shadow: var(--hud-shadow); transition: opacity .6s; opacity: 0; }
+  #radio small { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 16px; color: #eee; }
+  #msg { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); width: min(720px, max(300px, calc(100vw - 540px))); text-align: center; font-size: 24px; font-weight: 700; text-shadow: var(--hud-shadow); transition: opacity .4s; }
+  #obj { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); width: min(720px, max(300px, calc(100vw - 540px))); text-align: center; font-size: 22px; text-shadow: var(--hud-shadow); transition: opacity .4s; opacity: 0; }
+  #msg b, #obj b { color: var(--gold); }
+  #flash { position: absolute; top: 34%; left: 50%; transform: translateX(-50%); font-family: 'Anton', Impact, sans-serif; font-size: 30px; color: var(--gold); text-shadow: var(--hud-shadow); transition: opacity .4s; opacity: 0; }
+  #timer { display: none; position: absolute; top: 150px; right: 24px; font-family: 'Anton', Impact, sans-serif; font-size: 38px; text-shadow: var(--hud-shadow); }
+  #timer.low { color: #ff5050; }
+  #big { position: absolute; top: 40%; left: 0; right: 0; transform: translateY(-50%); text-align: center; font-family: 'Anton', Impact, sans-serif; font-size: clamp(48px, 9vw, 110px); letter-spacing: 2px; text-shadow: 0 4px 0 #000, 0 0 30px rgba(0,0,0,.8); transition: opacity .5s; opacity: 0; }
+  #big small { display: block; font-size: .3em; color: #eee; letter-spacing: 1px; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 2px #000; }
+  #crosshair::before { left: 10px; top: 3px; width: 2px; height: 16px; }
+  #crosshair::after { top: 10px; left: 3px; height: 2px; width: 16px; }
+  #dmg { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(170,0,0,.75)); opacity: 0; }
+  #bigmap { position: fixed; inset: 0; display: none; z-index: 4; }
+
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 16px; }
+  #title { background: linear-gradient(180deg, #1a0f3a 0%, #6a2c70 35%, #f08a5d 70%, #f9c56b 100%); overflow: hidden; }
+  #title::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 32%; background: linear-gradient(180deg, transparent, rgba(10,8,20,.85)); pointer-events: none; }
+  .skyline { position: absolute; left: 0; right: 0; bottom: 0; height: 42%; opacity: .9; }
+  .logo { position: relative; z-index: 2; }
+  .logo h1 { margin: 0; font-family: 'Anton', Impact, sans-serif; font-weight: 400; font-size: clamp(54px, 11vw, 140px); line-height: .9; color: #fff; text-shadow: 0 6px 0 #000, 0 0 40px rgba(0,0,0,.4); letter-spacing: 2px; }
+  .logo h1 span { color: var(--gold); }
+  .logo h2 { margin: 4px 0 0; font-family: 'Anton', Impact, sans-serif; font-weight: 400; font-size: clamp(30px, 6vw, 68px); color: var(--jacaranda); text-shadow: 0 4px 0 #000; letter-spacing: 8px; }
+  .tag { position: relative; z-index: 2; margin: 16px 0 26px; font-size: 20px; color: #fde8d0; text-shadow: 0 2px 0 #000; }
+  button { font-family: 'Anton', Impact, sans-serif; font-size: 26px; letter-spacing: 2px; padding: 12px 40px; color: #111; background: var(--gold); border: 0; border-radius: 4px; cursor: pointer; box-shadow: 0 5px 0 #8a6a00; position: relative; z-index: 2; }
+  button:hover { filter: brightness(1.08); }
+  #start { display: none; }
+  #loading { position: relative; z-index: 2; font-size: 22px; color: #fff; text-shadow: 0 2px 0 #000; }
+  .controls { position: relative; z-index: 2; display: grid; grid-template-columns: auto auto; gap: 4px 18px; margin-top: 26px; font-size: 17px; color: #f4ecff; text-align: left; text-shadow: 0 1px 0 #000; }
+  .controls b { color: var(--gold); font-weight: 700; text-align: right; }
+  #pause { display: none; background: rgba(8,10,20,.82); z-index: 5; cursor: pointer; }
+  #pause h3 { font-family: 'Anton', Impact, sans-serif; font-weight: 400; font-size: 64px; margin: 0; color: var(--gold); }
+  #touch { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+  body.touch.playing #touch { display: block; }
+  body.touch #mmwrap { top: calc(12px + var(--st)); left: calc(12px + var(--sl)); bottom: auto; width: 130px; }
+  body.touch #msg, body.touch #obj { width: min(720px, 92vw); }
+  body.touch #obj { bottom: auto; top: calc(30% + 56px); font-size: 17px; }
+  body.touch #minimap { width: 130px; height: 130px; }
+  body.touch #msg { bottom: auto; top: 30%; font-size: 19px; }
+  #joy { position: absolute; left: calc(24px + var(--sl)); bottom: calc(24px + var(--sb)); width: 150px; height: 150px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); pointer-events: auto; touch-action: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  #look { position: absolute; right: 0; top: 0; width: 55%; height: 100%; pointer-events: auto; touch-action: none; }
+  .tb { position: absolute; width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.5); color: #fff; font: 700 15px 'Barlow Condensed', sans-serif; display: flex; align-items: center; justify-content: center; pointer-events: auto; touch-action: none; }
+  .tb.on { background: rgba(255,210,58,.6); }
+  #tFire { right: calc(24px + var(--sr)); bottom: calc(30px + var(--sb)); width: 84px; height: 84px; background: rgba(200,40,40,.55); font-size: 18px; }
+  #tJump { right: calc(122px + var(--sr)); bottom: calc(22px + var(--sb)); } #tCar { right: calc(30px + var(--sr)); bottom: calc(132px + var(--sb)); } #tSprint { right: calc(120px + var(--sr)); bottom: calc(100px + var(--sb)); }
+  #tWeap, #tRadio, #tMap { top: calc(10px + var(--st)); width: 50px; height: 50px; font-size: 13px; }
+  #tWeap { right: calc(128px + var(--sr)); } #tRadio { right: calc(184px + var(--sr)); } #tMap { right: calc(240px + var(--sr)); }
+  body.touch #topright { top: calc(8px + var(--st)); right: calc(12px + var(--sr)); }
+  body.touch #clock { font-size: 13px; } body.touch #money { font-size: 24px; } body.touch #weapon { font-size: 16px; } body.touch #stars { font-size: 18px; }
+  body.touch #area, body.touch #veh { left: 50%; right: auto; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+  body.touch #area { bottom: auto; top: calc(66px + var(--st)); font-size: 20px; }
+  body.touch #veh { bottom: auto; top: calc(92px + var(--st)); font-size: 16px; }
+  body.touch #radio { font-size: 18px; top: calc(8px + var(--st)); } body.touch #radio small { font-size: 13px; }
+  body.touch #timer { top: calc(110px + var(--st)); font-size: 28px; }
+  body.touch #flash { font-size: 22px; }
+  .touchhint { display: none; position: relative; z-index: 2; font-size: 18px; color: #f4ecff; text-shadow: 0 1px 0 #000; margin-top: 18px; }
+  body.touch #title .controls { display: none; } body.touch .touchhint { display: block; }
+  @media (max-height: 520px) {
+    .logo h1 { font-size: clamp(40px, 9vw, 64px); } .logo h2 { font-size: 26px; letter-spacing: 5px; }
+    .tag { margin: 8px 0 12px; font-size: 16px; } #title .controls { display: none; } .touchhint { display: block; }
+  }
+  @media (max-width: 640px) {
+    #mmwrap { width: 150px; left: 12px; bottom: 12px; } #minimap { width: 150px; height: 150px; }
+    #topright { top: 10px; right: 12px; } #money { font-size: 26px; } #area { font-size: 24px; }
+    .controls { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+<div id="title" class="screen">
+  <svg class="skyline" viewBox="0 0 1200 300" preserveAspectRatio="none" aria-hidden="true">
+    <g fill="#140b24">
+      <rect x="0" y="230" width="1200" height="70"/>
+      <rect x="120" y="150" width="40" height="150"/><rect x="170" y="110" width="50" height="190"/><rect x="230" y="60" width="38" height="240"/>
+      <rect x="250" y="40" width="4" height="22"/><rect x="280" y="130" width="60" height="170"/><rect x="350" y="90" width="44" height="210"/>
+      <rect x="400" y="20" width="36" height="280"/><rect x="416" y="0" width="3" height="22"/><rect x="445" y="120" width="56" height="180"/>
+      <rect x="510" y="75" width="40" height="225"/><rect x="560" y="140" width="70" height="160"/><rect x="640" y="100" width="34" height="200"/>
+      <circle cx="1030" cy="190" r="62" fill="none" stroke="#140b24" stroke-width="5"/><rect x="1027" y="190" width="6" height="110"/>
+      <path d="M700 230 L700 150 L712 150 L760 205 L808 150 L820 150 L820 230 Z"/><path d="M640 232 L1000 232 L1000 240 L640 240 Z"/>
+      <path d="M836 230 L836 150 L848 150 L896 205 L944 150 L956 150 L956 230 Z"/>
+    </g>
+    <path d="M0 270 Q300 250 600 268 T1200 262 L1200 300 L0 300 Z" fill="#3b2a1f" opacity=".8"/>
+  </svg>
+  <div class="logo"><h1>GRAND THEFT <span>UTE</span></h1><h2>BRISVEGAS</h2></div>
+  <div class="tag">Story Bridge. Bin chickens. Magpie season. 35°C and humid. Welcome home.</div>
+  <div id="loading">Building Brisbane...</div>
+  <button id="start">CLICK TO PLAY</button>
+  <div class="touchhint">Left stick to move · drag the right side to look · buttons to shoot, jump and jack cars. Landscape works best.</div>
+  <div class="controls">
+    <b>Touch</b><span>Left stick moves, drag right side to look, buttons for the rest</span>
+    <b>WASD</b><span>Move / drive</span>
+    <b>Mouse</b><span>Look (drag if the cursor won't lock) · ← → also turn</span>
+    <b>Left click</b><span>Shoot / punch · Right click to aim</span>
+    <b>F</b><span>Get in / out of a car (or carjack someone)</span>
+    <b>Space</b><span>Jump / handbrake</span>
+    <b>Shift</b><span>Sprint</span>
+    <b>1-4 · Wheel</b><span>Weapons</span>
+    <b>Q</b><span>Change radio station · <b style="display:inline">H</b> horn · <b style="display:inline">E</b> siren (cop car)</span>
+    <b>M</b><span>Map · <b style="display:inline">P</b> pause</span>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="topright"><div id="clock"></div><div id="money">$0</div><div id="weapon"></div><div id="stars"></div></div>
+  <div id="mmwrap"><canvas id="minimap"></canvas><div class="bars"><div class="bar"><div id="hp"></div></div><div class="bar"><div id="ar"></div></div></div></div>
+  <div id="radio"></div>
+  <div id="veh"></div>
+  <div id="area"></div>
+  <div id="timer"></div>
+  <div id="flash"></div>
+  <div id="obj"></div>
+  <div id="msg"></div>
+  <div id="big"></div>
+  <div id="crosshair"></div>
+  <div id="dmg"></div>
+</div>
+<div id="touch">
+  <div id="look"></div>
+  <div id="joy"><div id="knob"></div></div>
+  <div class="tb" id="tFire">FIRE</div><div class="tb" id="tJump">JUMP</div><div class="tb" id="tCar">CAR</div>
+  <div class="tb" id="tSprint">RUN</div><div class="tb" id="tWeap">GUN</div><div class="tb" id="tRadio">RADIO</div><div class="tb" id="tMap">MAP</div>
+</div>
+<canvas id="bigmap"></canvas>
+<div id="pause" class="screen">
+  <h3>PAUSED</h3>
+  <div class="controls">
+    <b>WASD</b><span>Move / drive</span>
+    <b>Mouse</b><span>Look · Left click shoot · Right click aim</span>
+    <b>F</b><span>Enter / exit vehicle</span>
+    <b>Space</b><span>Jump / handbrake</span>
+    <b>1-4 · Wheel</b><span>Fists, cricket bat, pistol, SMG</span>
+    <b>Q</b><span>Radio · H horn · E siren</span>
+    <b>M</b><span>Map</span>
+  </div>
+  <p style="margin-top:28px;font-size:22px">Click to resume</p>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/util.js"></script>
+<script src="js/world.js"></script>
+<script src="js/worldBuild.js"></script>
+<script src="js/models.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/vehicles.js"></script>
+<script src="js/peds.js"></script>
+<script src="js/player.js"></script>
+<script src="js/police.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

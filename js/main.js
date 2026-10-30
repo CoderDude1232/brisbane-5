@@ -100,92 +100,6 @@ function pause(on) {
   else if (!on && G.state === 'paused') { G.state = 'play'; $('pause').style.display = 'none'; }
 }
 
-// ---------- Rendering setup ----------
-function initRenderer() {
-  const r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  G.mobile = matchMedia('(pointer: coarse)').matches;
-  r.setPixelRatio(Math.min(devicePixelRatio, G.mobile ? 1 : 1.5));
-  r.setSize(innerWidth, innerHeight);
-  r.shadowMap.enabled = true;
-  r.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.body.appendChild(r.domElement);
-  G.renderer = r;
-  G.scene = new THREE.Scene();
-  G.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, G.mobile ? 700 : 1600);
-  G.scene.fog = G.mobile ? new THREE.Fog(0x9cc8f0, 140, 520) : new THREE.Fog(0x9cc8f0, 220, 800);
-  G.hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a6a3a, 0.55);
-  G.scene.add(G.hemi);
-  G.sun = new THREE.DirectionalLight(0xfff1d6, 1.0);
-  G.sun.castShadow = true;
-  G.sun.shadow.mapSize.set(G.mobile ? 1024 : 2048, G.mobile ? 1024 : 2048);
-  const sc = G.sun.shadow.camera;
-  sc.left = -90; sc.right = 90; sc.top = 90; sc.bottom = -90; sc.near = 10; sc.far = 600;
-  G.sun.shadow.bias = -0.0006;
-  G.scene.add(G.sun); G.scene.add(G.sun.target);
-  G.amb = new THREE.AmbientLight(0xffffff, 0.15);
-  G.scene.add(G.amb);
-  // Clouds
-  G.clouds = [];
-  const cm = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.92 });
-  for (let k = 0; k < 28; k++) {
-    const c = new THREE.Group();
-    for (let j = 0; j < 5; j++) {
-      const p = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), cm);
-      p.scale.set(rand(18, 34), rand(7, 12), rand(14, 24));
-      p.position.set(rand(-30, 30), rand(-3, 3), rand(-15, 15));
-      c.add(p);
-    }
-    c.position.set(rand(-1200, 1200), rand(180, 260), rand(-1200, 1200));
-    G.scene.add(c); G.clouds.push(c);
-  }
-  const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(30, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff2c0, fog: false }));
-  G.sunDisc = sunDisc; G.scene.add(sunDisc);
-  addEventListener('resize', () => {
-    G.camera.aspect = innerWidth / innerHeight; G.camera.updateProjectionMatrix();
-    G.renderer.setSize(innerWidth, innerHeight);
-  });
-}
-
-const SKY = [
-  [0, '#070b1f'], [4.8, '#0d1430'], [5.8, '#e89a6a'], [7, '#9cc8f0'], [12, '#86bdf2'], [16.3, '#9cc8f0'],
-  [17.6, '#f39256'], [18.4, '#a8517a'], [19.3, '#1a1a40'], [24, '#070b1f'],
-];
-const _c1 = new THREE.Color(), _c2 = new THREE.Color();
-function skyAt(h) {
-  for (let k = 0; k < SKY.length - 1; k++) {
-    if (h >= SKY[k][0] && h <= SKY[k + 1][0]) {
-      const u = (h - SKY[k][0]) / (SKY[k + 1][0] - SKY[k][0]);
-      return _c1.set(SKY[k][1]).lerp(_c2.set(SKY[k + 1][1]), u);
-    }
-  }
-  return _c1.set(SKY[0][1]);
-}
-
-function updateDayNight(dt) {
-  G.timeOfDay = (G.timeOfDay + dt / 40) % 24;
-  const h = G.timeOfDay;
-  const elev = Math.sin(((h - 6) / 12) * Math.PI);
-  const day = clamp(elev * 3 + 0.3, 0, 1);
-  G.night = 1 - clamp(elev * 4 + 0.6, 0, 1);
-  const sky = skyAt(h);
-  G.scene.background = sky.clone();
-  G.scene.fog.color.copy(sky);
-  const az = ((h - 6) / 12) * Math.PI;
-  const px = Player.x, pz = Player.z;
-  const sx = Math.cos(az), sy = Math.max(Math.sin(az), 0.15), sz = 0.35;
-  G.sun.position.set(px + sx * 250, sy * 250, pz + sz * 250);
-  G.sun.target.position.set(px, 0, pz);
-  G.sun.intensity = 0.15 + day * 0.95;
-  G.sun.color.set(elev < 0.25 ? '#ffb27a' : '#fff1d6');
-  if (elev < 0) { G.sun.color.set('#8aa0d8'); G.sun.intensity = 0.18; G.sun.position.set(px - sx * 250, 200, pz - 150); }
-  G.hemi.intensity = 0.25 + day * 0.4;
-  G.amb.intensity = 0.12 + (1 - day) * 0.08;
-  const sd = G.camera.far * 0.8;
-  G.sunDisc.position.set(G.camera.position.x + Math.cos(az) * sd, Math.sin(az) * sd - 60, G.camera.position.z + sz * sd);
-  G.sunDisc.visible = elev > -0.05;
-  for (const m of World.nightMats) m.emissiveIntensity = G.night * 0.85;
-}
-
 // ---------- Camera ----------
 function updateCamera(dt) {
   const c = G.cam, P = Player;
@@ -389,7 +303,8 @@ function update(dt) {
     Spawner.update(sdt);
     for (const a of World.anim) a.update(sdt, t);
     FX.update(sdt);
-    updateDayNight(sdt);
+    Render.update(sdt);
+    Detail.update(sdt, G.camera.position.x, G.camera.position.z);
     for (const c of G.clouds) { c.position.x += sdt * 4; if (c.position.x > Player.x + 1300) c.position.x -= 2600; }
   }
   if (G.state !== 'map' && G.state !== 'title') updateCamera(dt);
@@ -410,12 +325,12 @@ function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   update(dt);
-  G.renderer.render(G.scene, G.camera);
+  Render.frame();
   requestAnimationFrame(loop);
 }
 
 function boot() {
-  initRenderer();
+  Render.init();
   const t0 = performance.now();
   buildWorld(G.scene);
   FX.init(G.scene);
@@ -431,7 +346,8 @@ function boot() {
   G.camera.lookAt(Player.x, 1, Player.z);
   G.camera.updateMatrixWorld();
   for (let k = 0; k < 60; k++) { Spawner.t = 0; Spawner.update(0.2); }
-  updateDayNight(0);
+  Render.update(0);
+  Detail.update(0, Player.x, Player.z, true);
   updateCamera(0.016);
   console.log('World built in', Math.round(performance.now() - t0), 'ms;', G.renderer.info.memory);
   $('loading').style.display = 'none';

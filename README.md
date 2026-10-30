@@ -59,6 +59,9 @@ You can't open the file directly from disk because browsers block the scripts it
 | `js/world.js` | River, road grid, bridges, suburbs, path-finding (pure data) |
 | `js/worldBuild.js` | Merges the city into chunked meshes: roads, generic buildings, houses, colliders, minimap image |
 | `js/landmarks.js` | Real Brisbane buildings |
+| `js/detail.js` | Close-up architectural detail streamed in around the camera |
+| `js/render.js` | Renderer, physical sky, reflections, bloom, day/night |
+| `js/textures.js` | Procedural PBR textures (facades, asphalt, water, foliage) |
 | `js/props.js` | Street furniture, riverbanks, CityCat terminals |
 | `js/models.js` | Low-poly people, cars, birds and the helicopter |
 | `js/vehicles.js` | Car physics, traffic AI, police pursuit AI, collisions |
@@ -70,4 +73,4 @@ You can't open the file directly from disk because browsers block the scripts it
 | `js/audio.js` | Synthesized engine, guns, sirens, radio |
 | `js/main.js` | Boot, input, camera, day/night, spawning, main loop |
 
-Three.js r128 is vendored in `lib/` (MIT license).
+Three.js r128 and its post-processing/sky example modules are vendored in `lib/` (MIT license); `lib/examples/Sky.js` adds a gain, night tint and stars.

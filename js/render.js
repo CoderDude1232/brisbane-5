@@ -82,11 +82,17 @@ const Render = {
       this.lastEnvH = -99;
 
       const pr = r.getPixelRatio();
-      const rt = r.capabilities.isWebGL2
+      const rt = new THREE.WebGLRenderTarget(innerWidth * pr, innerHeight * pr, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+      this.composer = new THREE.EffectComposer(r, rt);
+      // Ambient occlusion: darkens creases, window reveals, under ledges and where things meet the ground.
+      const ao = (this.ao = new THREE.SSAOPass(G.scene, G.camera, innerWidth * pr, innerHeight * pr));
+      ao.kernelRadius = 3.5; ao.minDistance = 0.00003; ao.maxDistance = 0.004; ao.strength = 3;
+      ao.beautyRenderTarget.dispose();
+      ao.beautyRenderTarget = r.capabilities.isWebGL2
         ? new THREE.WebGLMultisampleRenderTarget(innerWidth * pr, innerHeight * pr, { format: THREE.RGBAFormat, type: THREE.HalfFloatType })
         : new THREE.WebGLRenderTarget(innerWidth * pr, innerHeight * pr, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
-      this.composer = new THREE.EffectComposer(r, rt);
-      this.composer.addPass(new THREE.RenderPass(G.scene, G.camera));
+      this.composer.addPass(ao);
+      r.shadowMap.autoUpdate = false; // the AO normal pass must not redraw the shadow map
       this.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.55, 0.86);
       this.composer.addPass(this.bloom);
       this.composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
@@ -155,6 +161,13 @@ const Render = {
   },
 
   frame() {
+    G.renderer.shadowMap.needsUpdate = true;
+    if (this.ao) {
+      const u = this.ao.ssaoMaterial.uniforms;
+      u.cameraProjectionMatrix.value.copy(G.camera.projectionMatrix);
+      u.cameraInverseProjectionMatrix.value.copy(G.camera.projectionMatrixInverse);
+      u.cameraNear.value = G.camera.near; u.cameraFar.value = G.camera.far;
+    }
     if (this.composer) this.composer.render();
     else G.renderer.render(G.scene, G.camera);
   },

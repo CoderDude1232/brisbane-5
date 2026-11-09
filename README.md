@@ -72,7 +72,7 @@ Real inner Brisbane, about 6 km × 6.3 km from Toowong to Bulimba and Herston to
 | `js/audio.js` | Synthesized engine, guns, sirens, radio |
 | `js/main.js` | Boot, input, camera, day/night, spawning, main loop |
 
-Three.js r128 and its post-processing/sky example modules are vendored in `lib/` (MIT license); `lib/examples/Sky.js` adds a gain, night tint and stars.
+Three.js r128 and its post-processing/sky/SSAO example modules are vendored in `lib/` (MIT license). Local tweaks are marked "Brisvegas": `Sky.js` adds a gain, night tint and stars; `SSAOShader.js` fades AO with distance; `SSAOPass.js` can apply AO more than once for strength.
 
 ## Real map data
 

@@ -136,6 +136,18 @@ const Tex = {
     return t;
   },
 
+  // Normal map of overlapping leaves for the solid tree crowns.
+  leafNormal() {
+    const S = 256, c = this.canvas(S, S), g = c.getContext('2d');
+    g.fillStyle = '#808080'; g.fillRect(0, 0, S, S);
+    for (let k = 0; k < 2600; k++) {
+      const x = Math.random() * S, y = Math.random() * S, a = Math.random() * TAU, l = rand(6, 12), w = rand(2.5, 4.5);
+      const gr = g.createRadialGradient(x, y, 0, x, y, l);
+      const v = Math.round(rand(150, 255)); gr.addColorStop(0, `rgb(${v},${v},${v})`); gr.addColorStop(1, 'rgba(60,60,60,0)');
+      g.fillStyle = gr; g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.ellipse(0, 0, l, w, 0, 0, TAU); g.fill(); g.restore();
+    }
+    return this.tex(this.normalFrom(c, 6), false);
+  },
   contactShadow() {
     const S = 128, c = this.canvas(S, S), g = c.getContext('2d'), d = g.createImageData(S, S);
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {

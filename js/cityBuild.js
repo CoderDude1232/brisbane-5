@@ -10,6 +10,48 @@ function validColor(c) {
 }
 
 const OCTA = new THREE.OctahedronGeometry(1, 0);
+// Lumpy, leafy crown volumes: noise-displaced spheres, darker underneath and inside.
+const BLOBS = (() => {
+  const out = [];
+  for (let v = 0; v < 6; v++) {
+    const g = new THREE.SphereGeometry(1, 8, 5), p = g.attributes.position, sh = [];
+    const f1 = 1.7 + v * 0.3, ph = v * 1.9;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const n = 1 + 0.16 * Math.sin(x * f1 * 2.1 + ph) * Math.cos(z * f1 * 1.7 - ph) + 0.1 * Math.sin(y * 4.3 + x * 3.1 + ph);
+      p.setXYZ(i, x * n, y * n * (y < 0 ? 0.75 : 1), z * n);
+      sh.push(0.5 + 0.5 * clamp((y + 1) / 2, 0, 1) * (0.75 + 0.25 * n));
+    }
+    g.computeVertexNormals();
+    g.userData.shade = sh;
+    out.push(g);
+  }
+  return out;
+})();
+const FROND = (() => { // a drooping palm frond: tapering strip with a mid-rib fold
+  const pos = [], idx = [], n = 7;
+  for (let k = 0; k <= n; k++) {
+    const t = k / n, z = t * 1, y = -t * t * 0.55, w = 0.5 * Math.sin(Math.PI * Math.min(1, t * 1.15 + 0.05));
+    pos.push(-w, y - w * 0.15, z, 0, y + 0.03, z, w, y - w * 0.15, z);
+    if (k < n) { const q = k * 3; idx.push(q, q + 1, q + 3, q + 1, q + 4, q + 3, q + 1, q + 2, q + 4, q + 2, q + 5, q + 4); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+})();
+
+// Cut d0 metres off the start and d1 off the end of a polyline.
+function trimLine(pts, d0, d1) {
+  let L = 0; const cum = [0];
+  for (let k = 1; k < pts.length; k++) { L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); cum.push(L); }
+  if (L - d0 - d1 < 1) return null;
+  const at = (s) => { let k = 1; while (k < cum.length - 1 && cum[k] < s) k++; const u = (s - cum[k - 1]) / (cum[k] - cum[k - 1] || 1); return [lerp(pts[k - 1][0], pts[k][0], u), lerp(pts[k - 1][1], pts[k][1], u)]; };
+  const out = [at(d0)];
+  for (let k = 1; k < pts.length - 1; k++) if (cum[k] > d0 && cum[k] < L - d1) out.push(pts[k]);
+  out.push(at(L - d1));
+  return out;
+}
 
 function buildWorld(scene) {
   const d = World.data;
@@ -27,13 +69,15 @@ function buildWorld(scene) {
   MAT.road = mkMat({ map: T.road, vertexColors: true, roughness: 0.82, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   MAT.neon = new THREE.MeshBasicMaterial({ vertexColors: true });
   MAT.water = mkMat({ color: 0x4a5844, roughness: 0.14, metalness: 0.05, normalMap: T.waterN, normalScale: new THREE.Vector2(0.3, 0.3), envMapIntensity: 0.65 });
+  MAT.foliage = mkMat({ vertexColors: true, normalMap: Tex.leafNormal(), normalScale: new THREE.Vector2(1.2, 1.2), roughness: 0.82, metalness: 0, side: THREE.DoubleSide });
+  MAT.foliage.normalMap.repeat.set(3, 2);
   MAT.leaf = mkMat({ map: T.leaf, vertexColors: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
   MAT.leafDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaf, alphaTest: 0.5 });
   const aoTex = Tex.canvas(64, 4); { const g = aoTex.getContext('2d'), gr = g.createLinearGradient(0, 0, 64, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 4); }
   MAT.ao = new THREE.MeshBasicMaterial({ map: Tex.tex(aoTex, false, false), transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -10 });
   World.nightMats.push(MAT.glass, MAT.render);
 
-  const GL = new Merger(), R = new Merger(), P = new Merger(), PS = new Merger(), GR = new Merger(), GT = new Merger(), RD = new Merger(), NE = new Merger(), LF = new Merger(), AO = new Merger(), WT = new Merger();
+  const KB = new Merger(), GL = new Merger(), R = new Merger(), P = new Merger(), PS = new Merger(), GR = new Merger(), GT = new Merger(), RD = new Merger(), NE = new Merger(), LF = new Merger(), AO = new Merger(), WT = new Merger();
   const rng = mulberry32(2026);
   const rp = (a) => a[Math.floor(rng() * a.length)];
   const rr = (a, b) => a + rng() * (b - a);
@@ -81,6 +125,11 @@ function buildWorld(scene) {
     const motor = E.cls <= 1 || (E.cls >= 8 && E.cls <= 12);
     if (!motor && !E.bridge) GR.ribbon(pts, E.w + 6, 0.05, '#aaa8a1', 16, [0.01, 0.01]);
     RD.ribbon(pts, E.w, 0.07, E.cls === 14 ? '#a8705c' : '#ffffff', 16);
+    if (!motor && !E.bridge && E.len > 6) { // kerbs, trimmed back from junctions
+      const trim = (node) => (World.adj[node].filter((it) => !World.edges[it.e].walk).length >= 2 ? E.w / 2 + 3 : 0);
+      const kp = trimLine(pts, trim(E.a), trim(E.b));
+      if (kp) for (const sd of [1, -1]) KB.kerb(kp, sd * E.w / 2, 0.3, 0.16, '#c9c6bd');
+    }
     if (E.bridge) {
       for (let k = 1; k < pts.length; k++) {
         const a = pts[k - 1], b = pts[k], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -118,9 +167,14 @@ function buildWorld(scene) {
 
   // ---------- Trees ----------
   const shade = (hex, k) => { const c = new THREE.Color(hex); c.convertLinearToSRGB(); c.multiplyScalar(k); return '#' + c.getHexString(); };
+  const FOL = new Merger();
+  const blob = (x, y, z, sx, sy, sz, color) => FOL.add(BLOBS[Math.floor(rng() * BLOBS.length)], M(x, y, z, sx, sy, sz, 0, rng() * TAU, 0), color);
   const crown = (x, y, z, rx, ry, color, n = 3) => {
-    P.add(OCTA, M(x, y, z, rx * 0.5, ry * 0.55, rx * 0.5, 0, rng() * 3), shade(color, 0.7));
-    LF.cards(x, y, z, rx, ry, color, n);
+    blob(x, y, z, rx * 0.8, ry * 0.85, rx * 0.8, color);
+    for (let k = 0; k < n; k++) {
+      const a = rng() * TAU, d = rx * rr(0.35, 0.6);
+      blob(x + Math.cos(a) * d, y + rr(-0.2, 0.45) * ry, z + Math.sin(a) * d, rx * rr(0.45, 0.65), ry * rr(0.55, 0.8), rx * rr(0.45, 0.65), shade(color, rr(0.85, 1.1)));
+    }
   };
   const SPECIES = {
     jacaranda: [3.2, 5.6, 3, 0.32, '#5d4a3a', ['#a07ee0', '#9a78db', '#8b6ad0', '#b190ea'], 2.2, 1.4],
@@ -135,10 +189,11 @@ function buildWorld(scene) {
       const lean = rr(-0.12, 0.12), h = 7.2 * s;
       P.add(CYL, M(x, y + h / 2, z, 0.28 * s, h, 0.28 * s, lean, 0, lean), '#9a8466');
       const tx = x + Math.sin(lean) * h * 0.5, tz = z - Math.sin(lean) * h * 0.5;
-      for (let k = 0; k < 7; k++) {
-        const a = (k / 7) * TAU + rng() * 0.5, tilt = rr(0.25, 0.75);
-        LF.add(PLANE_H, M(tx + Math.sin(a) * 1.7 * s, y + h - 0.1 - tilt * 0.8, tz + Math.cos(a) * 1.7 * s, 1.9 * s, 1, 3.8 * s, tilt, a, 0), rp(['#6f9a4a', '#7fa955', '#5f8a42']), (u, v) => [0.5 + u * 0.5, v]);
+      for (let k = 0; k < 11; k++) {
+        const a = (k / 11) * TAU + rng() * 0.4, tilt = rr(-0.35, 0.25), L = rr(3.2, 4.2) * s;
+        FOL.add(FROND, M(tx, y + h + 0.1, tz, L * 0.9, L, L, tilt, a, 0), rp(['#5f8a3e', '#6f9a4a', '#557f38']));
       }
+      FOL.add(BLOBS[0], M(tx, y + h, tz, 0.55 * s, 0.6 * s, 0.55 * s), '#7a6a44');
     } else {
       const [trunkH, spread, nLimb, r, bark, leaves, crx, cry] = SPECIES[kind] || SPECIES.gum;
       const th = trunkH * s;
@@ -148,9 +203,9 @@ function buildWorld(scene) {
         const a = a0 + (k / nLimb) * TAU + rr(-0.3, 0.3), reach = spread * s * rr(0.5, 0.8);
         const ex = x + Math.cos(a) * reach, ez = z + Math.sin(a) * reach, ey = y + th + rr(1, 2.4) * s;
         P.limb(x, y + th * 0.85, z, ex, ey, ez, r * s * 0.5, bark);
-        LF.cards(ex, ey + cry * s * 0.3, ez, crx * s * rr(0.8, 1.15), cry * s * rr(0.9, 1.2), rp(leaves), 2);
+        blob(ex, ey + cry * s * 0.3, ez, crx * s * rr(0.75, 1.0), cry * s * rr(0.8, 1.05), crx * s * rr(0.75, 1.0), rp(leaves));
       }
-      crown(x, y + th + 2.2 * s, z, crx * s * 1.25, cry * s * 1.05, rp(leaves), 3);
+      crown(x, y + th + 2.2 * s, z, crx * s * 1.25, cry * s * 1.05, rp(leaves), 2);
     }
     if (collide) addCol(x - 0.4, x + 0.4, z - 0.4, z + 0.4, 6, -1, 'prop');
   };
@@ -164,7 +219,7 @@ function buildWorld(scene) {
   };
   for (let i = 0; i < d.trees.length; i += 2) tree(treeFor(d.trees[i], d.trees[i + 1]), d.trees[i], d.trees[i + 1], rr(0.8, 1.15));
   const freeSpot = (x, z, clear) => !World.isWater(x, z) && !pointInBuilding(x, 1, z) && !World.nearestEdge(x, z, clear, (E) => !E.walk || E.cname === 'pedestrian');
-  const treeBudget = G.mobile ? 0.45 : 1;
+  const treeBudget = G.mobile ? 0.35 : 0.7;
   for (const a of World.areas) {
     if (!['park', 'grass', 'wood'].includes(a.t)) continue;
     const [x0, z0, x1, z1] = a.box, area = Math.abs(polyArea(a.pts));
@@ -271,7 +326,7 @@ function buildWorld(scene) {
         if (wallTop > 100) NE.box(o.cx, wallTop + 3.4, o.cz, 0.8, 0.8, 0.8, '#ff2222');
       }
     }
-    if (wallTop > 18) Detail.add(o.cx, o.cz, 'tower', { pts, y0: Math.max(mh, 4), h: wallTop, style, slab: rp(['#e8e8e6', '#d2d6da', '#c9c1b0']), podium: null, ph: 0 });
+    if (wallTop - mh > 3.5) Detail.add(o.cx, o.cz, 'tower', { pts, y0: mh < 0.5 && wallTop > 8 && World.zoneAt(o.cx, o.cz) !== 'suburb' ? 4 : mh, h: wallTop, style, glass, tint, uvS, slab: rp(['#e8e8e6', '#d2d6da', '#c9c1b0', '#b8bcc0']) });
     if (b.n && (h > 60 || ov)) World.labels.push({ name: b.n, x: o.cx, z: o.cz, r: Math.max(18, Math.max(o.w, o.d) * 0.7) });
   }
 
@@ -317,11 +372,14 @@ function buildWorld(scene) {
   GT.build(MAT.groundTop, scene, false, true);
   WT.build(MAT.water, scene, false, true);
   RD.build(MAT.road, scene, false, true);
+  MAT.kerb = MAT.plain.clone(); MAT.kerb.side = THREE.DoubleSide;
+  KB.build(MAT.kerb, scene, false, true);
   GL.build(MAT.glass, scene, true, true);
   R.build(MAT.render, scene, true, true);
   P.build(MAT.plain, scene, true, true);
   PS.build(MAT.plain, scene, false, true);
   LF.build(MAT.leaf, scene, true, true, MAT.leafDepth);
+  FOL.build(MAT.foliage, scene, true, true);
   AO.build(MAT.ao, scene, false, false);
   NE.build(MAT.neon, scene, false, false);
 

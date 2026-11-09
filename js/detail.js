@@ -129,38 +129,69 @@ const DETAIL_BUILDERS = {
   },
 
   // ---- Towers: slab edges, mullion fins, balustrades, podium columns, entry canopy ----
+  // Facade relief lined up with the window texture: floor slabs, mullions/pilasters, sills, cornice.
   tower(K, p) {
     const { P, PS, G: Gl, NE } = K;
-    const { pts, y0, h, style, slab, podium, ph } = p;
+    const { pts, y0, h, style, slab, uvS, glass, tint } = p;
     if (style === 'balcony') {
       const ring = offsetPoly(pts, 1.75);
       for (let y = y0 + 3.2; y < h - 1; y += 3.2) {
         Gl.prism(ring, y + 0.22, 1.0, '#cfe0ea', 0, { cap: false });
         P.prism(offsetPoly(pts, 1.82), y + 1.2, 0.07, '#d8dadc', 0, { cap: false });
       }
-    } else {
-      const band = offsetPoly(pts, 0.25);
-      const step = style === 'office' ? 3.25 : 7;
-      for (let y = y0 + step; y < h - 1; y += step) P.prism(band, y, 0.35, slab, 0, { cap: false, bottom: false });
-      const fin = offsetPoly(pts, 0.35);
-      for (let i = 0; i < pts.length; i++) {
-        const a = fin[i], b = fin[(i + 1) % pts.length];
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const nF = Math.floor(len / 3.5);
-        if (pts.length <= 8) PS.box(a[0], y0, a[1], 0.5, h - y0, 0.5, slab);
-        if (style !== 'fins' || nF < 1) continue;
-        const ry = Math.atan2(b[0] - a[0], b[1] - a[1]);
-        for (let k = 1; k < nF; k++) { const t = k / nF; PS.box(lerp(a[0], b[0], t), y0, lerp(a[1], b[1], t), 0.9, h - y0, 0.18, slab, ry); }
+      return;
+    }
+    const cell = (uvS || 26) / 8;
+    const frame = glass ? slab : shadeHex(tint || slab, 0.92);
+    const first = Math.ceil((y0 + 0.3) / cell) * cell;
+    // horizontal: floor slab edge on every floor; on punched-window walls also a sill and a lintel
+    const fl = offsetPoly(pts, glass ? 0.32 : 0.22), sill = offsetPoly(pts, 0.16), lint = offsetPoly(pts, 0.1);
+    const nFloors = Math.floor((h - first) / cell);
+    const every = nFloors > 45 ? 2 : 1;
+    for (let k = 0, y = first; y < h - 0.6; y += cell, k++) {
+      if (k % every === 0) P.prism(fl, y - 0.14, glass ? 0.28 : 0.2, frame, 0, { bottom: true });
+      if (!glass && nFloors < 30) {
+        PS.prism(sill, y + 0.16 * cell - 0.05, 0.1, shadeHex(frame, 1.08), 0, { bottom: true });
+        PS.prism(lint, y + 0.79 * cell, 0.12, frame, 0, { bottom: true });
       }
     }
-    if (podium) {
-      const cr = offsetPoly(podium, 1.2);
-      for (let i = 0; i < cr.length; i++) {
-        const a = cr[i], b = cr[(i + 1) % cr.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        for (let s = 2; s < len - 1; s += 5) { const t = s / len; PS.cyl(lerp(a[0], b[0], t), 0, lerp(a[1], b[1], t), 0.3, ph, '#e2e0da', 10); }
+    // vertical: mullions (curtain wall) or pilasters between windows, on the texture's cell grid
+    let per = 0;
+    const depth = glass ? 0.32 : 0.18, wid = glass ? 0.2 : 0.8;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const ex = dx / len, ez = dz / len, nx = ez, nz = -ex, ry = Math.atan2(-ez, ex);
+      if (len >= cell * 0.9 && pts.length <= 40) {
+        const step = glass && h > 120 ? cell * 2 : cell;
+        for (let s = Math.ceil(per / step) * step - per; s <= len + 1e-3; s += step) {
+          const x = a[0] + ex * s + nx * depth / 2, z = a[1] + ez * s + nz * depth / 2;
+          P.box(x, y0, z, wid, h - y0, depth, frame, ry);
+        }
       }
-      P.prism(offsetPoly(podium, 1.6), ph - 0.6, 0.6, '#e8e6e0', 0, { bottom: true });
-      NE.prism(offsetPoly(podium, 1.0), ph - 0.75, 0.12, '#fff3d6', 0, { cap: false });
+      // corner column
+      PS.box(a[0] + nx * 0.1, y0, a[1] + nz * 0.1, 0.45, h - y0, 0.45, frame, ry);
+      per += len;
+    }
+    // cornice at the top
+    P.prism(offsetPoly(pts, 0.55), h - 0.9, 0.5, shadeHex(frame, 1.05), 0, { bottom: true });
+    P.prism(offsetPoly(pts, 0.35), h - 0.4, 0.4, frame, 0, { bottom: true });
+    // rooftop plant: AC units, ducts, a water tank or two
+    const o = obb(pts);
+    if (o.w > 6 && o.d > 6) {
+      const c0 = Math.cos(o.ang), s0 = Math.sin(o.ang), r = mulberry32(Math.floor(Math.abs(o.cx * 13 + o.cz * 7)));
+      const at = (u, v) => [o.cx + u * c0 + v * s0, o.cz - u * s0 + v * c0];
+      const n = Math.min(7, Math.floor((o.w * o.d) / 60) + 1);
+      for (let k = 0; k < n; k++) {
+        const [x, z] = at((r() - 0.5) * o.w * 0.7, (r() - 0.5) * o.d * 0.7);
+        if (!pip(x, z, pts)) continue;
+        const t = r();
+        if (t < 0.5) { PS.box(x, h, z, 1.8, 1.3, 1.2, '#b9bcbe', o.ang); PS.cyl(x, h + 1.3, z, 0.45, 0.12, '#55595c', 10); }
+        else if (t < 0.75) PS.cyl(x, h, z, 1.1, 2.2, '#c8ccce', 14);
+        else PS.box(x, h, z, 3.5, 0.7, 0.7, '#a9adb0', o.ang + 0.3);
+      }
+      if (h > 60) NE.box(o.cx, h + 0.4, o.cz, 0.6, 0.6, 0.6, '#ff2222');
     }
   },
 

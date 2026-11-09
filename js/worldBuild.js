@@ -68,7 +68,8 @@ class Merger {
       let u = uv ? uv.getX(k) : 0, w = uv ? uv.getY(k) : 0;
       if (uvFn) { const r = uvFn(u, w, lnx, lny, lnz); u = r[0]; w = r[1]; }
       ch.u.push(u, w);
-      ch.c.push(_col.r, _col.g, _col.b);
+      const sh = g.userData.shade ? g.userData.shade[k] : 1;
+      ch.c.push(_col.r * sh, _col.g * sh, _col.b * sh);
     }
     if (idx) for (let k = 0; k < idx.count; k++) ch.i.push(base + idx.getX(k));
     else for (let k = 0; k < pos.count; k++) ch.i.push(base + k);
@@ -207,6 +208,37 @@ class Merger {
         ch.c.push(_col.r, _col.g, _col.b);
       }
       if (k < n - 1) { const q = base + k * 2; ch.i.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); }
+    }
+  }
+  // Raised kerb along a polyline: top strip plus the face towards the road (side = +1 left / -1 right).
+  kerb(pts, off, w, h, color) {
+    const n = pts.length;
+    if (n < 2) return;
+    const ch = this._chunk(pts[n >> 1][0], pts[n >> 1][1]);
+    _col.set(color);
+    const inner = [], outer = [];
+    for (let k = 0; k < n; k++) {
+      const p = pts[k], a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
+      let tx = b[0] - a[0], tz = b[1] - a[1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+      const nx = tz, nz = -tx;
+      inner.push([p[0] + nx * off, p[1] + nz * off]); outer.push([p[0] + nx * (off + Math.sign(off) * w), p[1] + nz * (off + Math.sign(off) * w)]);
+    }
+    const sgn = Math.sign(off) || 1;
+    const quad = (A, B, C, D, nx, ny, nz) => { // A,B bottom/inner pair along the line; C,D the other row
+      const base = ch.p.length / 3;
+      for (const q of [A, B, C, D]) { ch.p.push(q[0], q[1], q[2]); ch.n.push(nx, ny, nz); ch.u.push(0.01, 0.01); ch.c.push(_col.r, _col.g, _col.b); }
+      ch.i.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    };
+    for (let k = 0; k < n - 1; k++) {
+      const i0 = inner[k], i1 = inner[k + 1], o0 = outer[k], o1 = outer[k + 1];
+      let tx = i1[0] - i0[0], tz = i1[1] - i0[1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+      const fx = -tz * sgn, fz = tx * sgn; // face normal, pointing at the road
+      // road-facing side
+      if (sgn > 0) quad([i0[0], 0.06, i0[1]], [i1[0], 0.06, i1[1]], [i0[0], h, i0[1]], [i1[0], h, i1[1]], fx, 0, fz);
+      else quad([i1[0], 0.06, i1[1]], [i0[0], 0.06, i0[1]], [i1[0], h, i1[1]], [i0[0], h, i0[1]], fx, 0, fz);
+      // top
+      if (sgn > 0) quad([i0[0], h, i0[1]], [i1[0], h, i1[1]], [o0[0], h, o0[1]], [o1[0], h, o1[1]], 0, 1, 0);
+      else quad([i1[0], h, i1[1]], [i0[0], h, i0[1]], [o1[0], h, o1[1]], [o0[0], h, o0[1]], 0, 1, 0);
     }
   }
   // Tapered round limb between two points (tree branches, posts at angles).

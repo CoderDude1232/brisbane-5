@@ -70,7 +70,7 @@ function buildWorld(scene) {
   MAT.neon = new THREE.MeshBasicMaterial({ vertexColors: true });
   MAT.water = mkMat({ color: 0x4a5844, roughness: 0.14, metalness: 0.05, normalMap: T.waterN, normalScale: new THREE.Vector2(0.3, 0.3), envMapIntensity: 0.65 });
   MAT.foliage = mkMat({ vertexColors: true, normalMap: Tex.leafNormal(), normalScale: new THREE.Vector2(1.2, 1.2), roughness: 0.82, metalness: 0, side: THREE.DoubleSide });
-  MAT.foliage.normalMap.repeat.set(3, 2);
+  if (MAT.foliage.normalMap) MAT.foliage.normalMap.repeat.set(3, 2);
   MAT.leaf = mkMat({ map: T.leaf, vertexColors: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
   MAT.leafDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaf, alphaTest: 0.5 });
   const aoTex = Tex.canvas(64, 4); { const g = aoTex.getContext('2d'), gr = g.createLinearGradient(0, 0, 64, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 4); }

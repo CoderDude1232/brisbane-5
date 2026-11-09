@@ -70,6 +70,8 @@
   button { font-family: 'Anton', Impact, sans-serif; font-size: 26px; letter-spacing: 2px; padding: 12px 40px; color: #111; background: var(--gold); border: 0; border-radius: 4px; cursor: pointer; box-shadow: 0 5px 0 #8a6a00; position: relative; z-index: 2; }
   button:hover { filter: brightness(1.08); }
   #start { display: none; }
+  .credit { position: absolute; bottom: calc(10px + var(--sb)); right: calc(14px + var(--sr)); z-index: 2; font-size: 13px; color: #e8e0f0; text-shadow: 0 1px 0 #000; }
+  .credit a { color: var(--gold); }
   #loading { position: relative; z-index: 2; font-size: 22px; color: #fff; text-shadow: 0 2px 0 #000; }
   .controls { position: relative; z-index: 2; display: grid; grid-template-columns: auto auto; gap: 4px 18px; margin-top: 26px; font-size: 17px; color: #f4ecff; text-align: left; text-shadow: 0 1px 0 #000; }
   .controls b { color: var(--gold); font-weight: 700; text-align: right; }
@@ -130,6 +132,7 @@
   <div class="logo"><h1>GRAND THEFT <span>UTE</span></h1><h2>BRISVEGAS</h2></div>
   <div class="tag">Story Bridge. Bin chickens. Magpie season. 35°C and humid. Welcome home.</div>
   <div id="loading">Building Brisbane...</div>
+  <div class="credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL)</div>
   <button id="start">CLICK TO PLAY</button>
   <div class="touchhint">Left stick to move · drag the right side to look · buttons to shoot, jump and jack cars. Landscape works best.</div>
   <div class="controls">
@@ -201,6 +204,7 @@
 <script src="js/landmarks.js"></script>
 <script src="js/props.js"></script>
 <script src="js/detail.js"></script>
+<script src="js/cityBuild.js"></script>
 <script src="js/models.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/effects.js"></script>

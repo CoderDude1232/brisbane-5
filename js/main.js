@@ -148,13 +148,14 @@ function updateCamera(dt) {
 const Spawner = {
   t: 0, magT: 25, frustum: new THREE.Frustum(), pm: new THREE.Matrix4(),
   visible(x, y, z) { return this.frustum.containsPoint(new THREE.Vector3(x, y, z)); },
-  randomEdge(minR, maxR) {
-    const a = Math.random() * TAU, r = rand(minR, maxR);
-    const n = World.nearestNode(Player.x + Math.sin(a) * r, Player.z + Math.cos(a) * r);
-    if (!n) return null;
-    const nb = World.neighbors(n[0], n[1]);
-    if (!nb.length) return null;
-    return [n, pick(nb)];
+  // A random road edge in a ring around the player.
+  randomEdge(minR, maxR, filter) {
+    for (let k = 0; k < 6; k++) {
+      const a = Math.random() * TAU, r = rand(minR, maxR);
+      const n = World.nearestEdge(Player.x + Math.sin(a) * r, Player.z + Math.cos(a) * r, 60, filter);
+      if (n) return n;
+    }
+    return null;
   },
   update(dt) {
     this.t -= dt;
@@ -169,76 +170,71 @@ const Spawner = {
       const keep = v.driver === 'player' || v === Player.lastCar;
       if (v.ai && v.ai.mode === 'traffic') {
         traffic++;
-        if (!keep && (d > 460 || (d > 200 && (v.ai.lost || v.dead) && !this.visible(v.x, 1, v.z)))) v.remove();
+        if (!keep && (d > 420 || (d > 160 && (v.ai.lost || v.dead) && !this.visible(v.x, 1, v.z)))) v.remove();
       } else {
         if (!v.driver) parked++;
         const chasing = v.ai && v.ai.mode === 'police' && G.wanted > 0;
-        if (!keep && !chasing && d > 380 && !this.visible(v.x, 1, v.z)) v.remove();
+        if (!keep && !chasing && d > 360 && !this.visible(v.x, 1, v.z)) v.remove();
         else if (!keep && v.dead && v.wreckT < 0 && !this.visible(v.x, 1, v.z)) v.remove();
       }
     }
-    if (traffic < (G.mobile ? 24 : 36)) {
-      const e = this.randomEdge(130, 380);
-      if (e) {
-        const [a, b] = e;
-        const ax = lineC(a[0]), az = lineC(a[1]), bx2 = lineC(b[0]), bz = lineC(b[1]);
-        const dx = Math.sign(bx2 - ax), dz = Math.sign(bz - az);
-        const u = rand(0.3, 0.7);
-        const x = lerp(ax, bx2, u) + dz * LANE, z = lerp(az, bz, u) - dx * LANE;
+    if (traffic < (G.mobile ? 22 : 38)) {
+      const n = this.randomEdge(110, 340, (E) => E.car && E.len > 20);
+      if (n) {
+        const E = World.edges[n.e], dir = E.oneway ? 1 : Math.random() < 0.5 ? 1 : -1;
+        const s = dir > 0 ? n.s : E.len - n.s;
+        const [x, z, tx, tz] = lanePoint(n.e, dir, s);
         const d = Math.hypot(x - px, z - pz);
-        const clear = G.vehicles.every((v) => Math.hypot(v.x - x, v.z - z) > 10);
-        if (clear && d > 120 && !(d < 260 && this.visible(x, 1, z)) && !World.inRiver(x, z)) {
+        const clear = G.vehicles.every((v) => Math.hypot(v.x - x, v.z - z) > 12);
+        if (clear && d > 100 && !(d < 240 && this.visible(x, 1, z)) && !World.inRiver(x, z)) {
           const police = Math.random() < 0.05;
-          const type = police ? 'police' : pick(TRAFFIC_MIX);
-          const v = new Vehicle(type, x, z, Math.atan2(dx, dz), { driver: police ? 'cop' : 'civ', ai: { mode: 'traffic', a, b, stage: 0 } });
-          v.vx = Math.sin(v.h) * v.cruise * 0.8; v.vz = Math.cos(v.h) * v.cruise * 0.8;
+          const type = police ? 'police' : pick(E.cls <= 1 ? TRAFFIC_MIX.filter((t) => t !== 'bus') : TRAFFIC_MIX);
+          const v = new Vehicle(type, x, z, Math.atan2(tx, tz), { driver: police ? 'cop' : 'civ', ai: { mode: 'traffic', e: n.e, dir, s } });
+          v.vx = tx * v.cruise * 0.7; v.vz = tz * v.cruise * 0.7;
         }
       }
     }
-    if (parked < 10) {
-      const e = this.randomEdge(70, 260);
-      if (e) {
-        const [a, b] = e;
-        const ax = lineC(a[0]), az = lineC(a[1]), bx2 = lineC(b[0]), bz = lineC(b[1]);
-        const dx = Math.sign(bx2 - ax), dz = Math.sign(bz - az);
-        const u = rand(0.3, 0.7);
-        const x = lerp(ax, bx2, u) + dz * 5.6, z = lerp(az, bz, u) - dx * 5.6;
+    if (parked < 12) { // kerbside parking on local streets
+      const n = this.randomEdge(60, 240, (E) => E.car && E.cls >= 4 && E.cls <= 7 && E.len > 25);
+      if (n) {
+        const E = World.edges[n.e], [x0, z0, tx, tz] = World.pointAt(n.e, 1, n.s), o = E.w / 2 - 1.1;
+        const x = x0 + tz * o, z = z0 - tx * o;
         const clear = G.vehicles.every((v) => Math.hypot(v.x - x, v.z - z) > 8);
-        if (clear && World.edge(a[0], a[1], b[0], b[1]) === 1 && !this.visible(x, 1, z)) new Vehicle(pick(TRAFFIC_MIX.filter((t) => t !== 'bus')), x, z, Math.atan2(dx, dz));
+        if (clear && !this.visible(x, 1, z) && !pointInBuilding(x, 1, z) && !World.isWater(x, z)) new Vehicle(pick(TRAFFIC_MIX.filter((t) => t !== 'bus')), x, z, Math.atan2(tx, tz));
       }
     }
-    // Pedestrians
+    // Pedestrians on footpaths
     let civs = 0;
     for (const p of G.peds.slice()) {
       if (p.mission) continue;
       const d = Math.hypot(p.x - px, p.z - pz);
       if (p.kind === 'civ' || (p.kind === 'cop' && G.wanted === 0)) civs++;
-      if (d > 270 && !this.visible(p.x, 1, p.z)) p.remove();
+      if (d > 260 && !this.visible(p.x, 1, p.z)) p.remove();
     }
-    const want = G.mobile ? 32 : 55;
+    const busy = World.zoneAt(px, pz) === 'cbd' || World.zoneAt(px, pz) === 'valley' || World.zoneAt(px, pz) === 'southbank';
+    const want = (G.mobile ? 30 : 55) * (busy ? 1.3 : 0.8);
     for (let k = 0; k < 3 && civs < want; k++) {
-      const a = Math.random() * TAU, r = rand(50, 230);
-      const n = World.nearestNode(px + Math.sin(a) * r, pz + Math.cos(a) * r);
+      const n = this.randomEdge(40, 220, (E) => World.walkable(E));
       if (!n) continue;
-      const x = lineC(n[0]) + pick([-9.5, 9.5]), z = lineC(n[1]) + pick([-9.5, 9.5]);
-      if (World.inRiver(x, z) || (Math.hypot(x - px, z - pz) < 90 && this.visible(x, 1, z))) continue;
-      new Ped(Math.random() < 0.06 ? 'cop' : 'civ', x, z);
+      const E = World.edges[n.e], side = Math.random() < 0.5 ? 1 : -1;
+      const [x0, z0, tx, tz] = World.pointAt(n.e, 1, n.s), o = E.walk ? 0 : (E.w / 2 + 1.6) * side;
+      const x = x0 + tz * o, z = z0 - tx * o;
+      if (World.inRiver(x, z) || pointInBuilding(x, 1, z) || (Math.hypot(x - px, z - pz) < 80 && this.visible(x, 1, z))) continue;
+      const p = new Ped(Math.random() < 0.05 ? 'cop' : 'civ', x, z, { nav: { e: n.e, dir: Math.random() < 0.5 ? 1 : -1, side } });
       civs++;
     }
-    // Bin chickens
+    // Bin chickens in parks and plazas
     let ibis = 0;
     for (const b of G.birds.slice()) { if (Math.hypot(b.x - px, b.z - pz) > 220 && !b.thief) b.remove(); else ibis++; }
-    if (ibis < 7) {
-      const a = Math.random() * TAU, r = rand(40, 180);
+    if (ibis < 8) {
+      const a = Math.random() * TAU, r = rand(40, 170);
       const x = px + Math.sin(a) * r, z = pz + Math.cos(a) * r;
-      const blk = World.blockAt(x, z);
-      if (blk && !blk.wet && ['park', 'cbd', 'southbank', 'mid'].includes(blk.zone) && !pointInBuilding(x, 1, z) && !World.isWater(x, z) && !this.visible(x, 0.5, z)) {
-        new Ibis(x, z);
-      }
+      const ok = World.areas.some((ar) => (ar.t === 'park' || ar.t === 'plaza' || ar.t === 'grass') && x > ar.box[0] && x < ar.box[2] && z > ar.box[1] && z < ar.box[3] && pip(x, z, ar.pts));
+      if (ok && !pointInBuilding(x, 1, z) && !World.isWater(x, z) && !this.visible(x, 0.5, z)) new Ibis(x, z);
     }
-    // Magpie season
-    const blk = World.blockAt(px, pz);
-    if (!Player.car && !Player.dead && blk && ['suburb', 'park'].includes(blk.zone) && G.night < 0.5) {
+    // Magpie season in the leafy suburbs
+    const zone = World.zoneAt(px, pz);
+    if (!Player.car && !Player.dead && (zone === 'suburb' || zone === 'mid') && G.night < 0.5) {
       this.magT -= 0.2;
       if (this.magT <= 0 && !G.magpie) {
         G.magpie = new Magpie();
@@ -249,19 +245,54 @@ const Spawner = {
   },
 };
 
-function placePickups() {
-  const corner = (x, z) => { const n = World.nearestNode(x, z); return n ? [lineC(n[0]) + 9.5, lineC(n[1]) + 9.5] : [x, z]; };
+// A spot on the footpath next to the nearest road.
+function kerbSpot(x, z) {
+  const n = World.nearestEdge(x, z, 120, (E) => !E.walk && E.cls <= 13);
+  if (!n) return { x, z };
+  const E = World.edges[n.e], [px, pz, tx, tz] = World.pointAt(n.e, 1, n.s);
+  const side = Math.sign((x - px) * tz - (z - pz) * tx) || 1, o = (E.w / 2 + 1.8) * side;
+  return { x: px + tz * o, z: pz - tx * o };
+}
+function roadSpot(x, z) {
+  const n = World.nearestEdge(x, z, 150, (E) => E.car);
+  if (!n) return { x, z };
+  const [px, pz] = World.pointAt(n.e, 1, n.s);
+  return { x: px, z: pz };
+}
+
+function definePois() {
   const P = World.pois;
-  const add = (t, x, z, o = {}) => { const [a, b] = corner(x, z); Pickups.add(t, a, b, Object.assign({ respawn: 90 }, o)); };
-  add('health', P.hospital.x, P.hospital.z); add('health', -60, 360); add('health', 300, 240); add('health', -280, 380);
-  add('health', 480, -60); add('health', -420, -300); add('health', -660, -40); add('health', 120, -640);
-  add('armor', P.police.x, P.police.z); add('armor', 240, -460); add('armor', 650, -520);
-  add('pistol', -300, 420, { amount: 48 }); add('pistol', -160, -360, { amount: 48 }); add('pistol', 400, -100, { amount: 48 });
-  add('smg', 420, -560, { amount: 150 }); add('smg', 140, -620, { amount: 150 });
-  add('bat', P.gabba.x + 20, P.gabba.z);
+  const at = (lat, lon, road) => { const [x, z] = ll(lat, lon); return road ? roadSpot(x, z) : kerbSpot(x, z); };
+  P.hospital = at(-27.4483, 153.0283);
+  const hq = Decor.one('Queensland Police Headquarters');
+  P.police = hq ? kerbSpot(...polyCenter(hq.pts)) : at(-27.4655, 153.0180);
+  P.southbank = at(-27.4772, 153.0225);
+  P.gabba = at(-27.48455, 153.0378, true);
+  P.xxxx = at(-27.4672, 153.0052, true);
+  P.kpcliffs = at(-27.4772, 153.0342);
+  P.lookout = at(-27.4790, 153.0339, true);
+  P.mall = at(-27.4697, 153.0230, true);
+  P.valley = at(-27.4568, 153.0349, true);
+  P.springhill = at(-27.4622, 153.0218);
+  P.gardens = at(-27.4745, 153.0293);
+  P.eagle = at(-27.4683, 153.0300);
+  P.milton = at(-27.4697, 153.0040);
+}
+
+function placePickups() {
+  const add = (t, lat, lon, o = {}) => { const [x0, z0] = ll(lat, lon); const { x, z } = kerbSpot(x0, z0); Pickups.add(t, x, z, Object.assign({ respawn: 90 }, o)); };
+  const P = World.pois;
+  Pickups.add('health', P.hospital.x, P.hospital.z, { respawn: 60 });
+  Pickups.add('armor', P.police.x, P.police.z, { respawn: 90 });
+  add('health', -27.4790, 153.0230); add('health', -27.4860, 153.0360); add('health', -27.4820, 153.0090);
+  add('health', -27.4690, 153.0490); add('health', -27.4590, 153.0010); add('health', -27.4560, 153.0350);
+  add('armor', -27.4570, 153.0340); add('armor', -27.4470, 153.0440);
+  add('pistol', -27.4840, 153.0110, { amount: 48 }); add('pistol', -27.4610, 153.0230, { amount: 48 }); add('pistol', -27.4780, 153.0370, { amount: 48 });
+  add('smg', -27.4460, 153.0450, { amount: 150 }); add('smg', -27.4440, 153.0360, { amount: 150 });
+  Pickups.add('bat', P.gabba.x + 3, P.gabba.z + 3, { respawn: 60 });
   Pickups.add('bat', P.southbank.x + 4, P.southbank.z + 2, { respawn: 60 });
-  const cash = [[0, 0], [-200, -200], [300, -300], [-500, 200], [600, 400], [-800, 500], [200, 800], [700, -700], [-400, -700], [900, 100], [-900, -100], [100, 500]];
-  for (const [x, z] of cash) add('cash', x, z, { amount: randi(80, 400), respawn: 150 });
+  for (const [lat, lon] of [[-27.4700, 153.0260], [-27.4640, 153.0200], [-27.4590, 153.0330], [-27.4800, 153.0170], [-27.4900, 153.0300], [-27.4650, 153.0460], [-27.4520, 153.0080], [-27.4750, 153.0050], [-27.4880, 153.0450], [-27.4560, 153.0440], [-27.4930, 153.0150], [-27.4470, 153.0280]])
+    add('cash', lat, lon, { amount: randi(80, 400), respawn: 150 });
 }
 
 // ---------- Game flow ----------
@@ -305,7 +336,8 @@ function update(dt) {
     FX.update(sdt);
     Render.update(sdt);
     Detail.update(sdt, G.camera.position.x, G.camera.position.z);
-    for (const c of G.clouds) { c.position.x += sdt * 4; if (c.position.x > Player.x + 1300) c.position.x -= 2600; }
+    Signals.update(sdt, G.camera.position.x, G.camera.position.z);
+    for (const c of G.clouds) { c.position.x += sdt * 4; if (c.position.x > Player.x + 3000) c.position.x -= 6000; }
   }
   if (G.state !== 'map' && G.state !== 'title') updateCamera(dt);
   if (G.state !== 'title') HUD.update(dt, t);
@@ -332,30 +364,43 @@ function loop(now) {
 function boot() {
   Render.init();
   const t0 = performance.now();
-  buildWorld(G.scene);
-  FX.init(G.scene);
-  const s = World.pois.southbank;
-  Player.init(s.x - 4, s.z + 8);
-  G.cam.yaw = 0;
-  placePickups();
-  Missions.init();
-  HUD.init();
-  Input.init(G.renderer.domElement);
-  // Pre-populate so the city isn't empty on the first frame.
-  G.camera.position.set(Player.x, 3, Player.z + 6);
-  G.camera.lookAt(Player.x, 1, Player.z);
-  G.camera.updateMatrixWorld();
-  for (let k = 0; k < 60; k++) { Spawner.t = 0; Spawner.update(0.2); }
-  Render.update(0);
-  Detail.update(0, Player.x, Player.z, true);
-  updateCamera(0.016);
-  console.log('World built in', Math.round(performance.now() - t0), 'ms;', G.renderer.info.memory);
-  $('loading').style.display = 'none';
-  $('start').style.display = 'inline-block';
-  if (G.mobile) $('start').textContent = 'TAP TO PLAY';
-  $('start').onclick = startGame;
-  $('pause').onclick = () => { pause(false); try { G.renderer.domElement.requestPointerLock(); } catch (e) { /* ignore */ } };
-  requestAnimationFrame(loop);
+  $('loading').textContent = 'Loading Brisbane map data...';
+  fetch('data/brisbane.json')
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then((data) => {
+      $('loading').textContent = 'Building Brisbane...';
+      return new Promise((res) => setTimeout(() => res(data), 30));
+    })
+    .then((data) => {
+      World.load(data);
+      buildWorld(G.scene);
+      definePois();
+      FX.init(G.scene);
+      const s = World.pois.southbank, ne = World.nearestEdge(s.x, s.z, 120, (E) => !E.walk);
+      let sp = { x: s.x + 8, z: s.z + 8 };
+      if (ne) { const E = World.edges[ne.e], [px, pz, tx, tz] = World.pointAt(ne.e, 1, Math.min(E.len, ne.s + 16)), o = E.w / 2 + 1.8; sp = { x: px + tz * o, z: pz - tx * o }; }
+      Player.init(sp.x, sp.z);
+      G.cam.yaw = 0;
+      placePickups();
+      Missions.init();
+      HUD.init();
+      Input.init(G.renderer.domElement);
+      G.camera.position.set(Player.x, 3, Player.z + 6);
+      G.camera.lookAt(Player.x, 1, Player.z);
+      G.camera.updateMatrixWorld();
+      for (let k = 0; k < 60; k++) { Spawner.t = 0; Spawner.update(0.2); }
+      Render.update(0);
+      Detail.update(0, Player.x, Player.z, true);
+      updateCamera(0.016);
+      console.log('World built in', Math.round(performance.now() - t0), 'ms');
+      $('loading').style.display = 'none';
+      $('start').style.display = 'inline-block';
+      if (G.mobile) $('start').textContent = 'TAP TO PLAY';
+      $('start').onclick = startGame;
+      $('pause').onclick = () => { pause(false); try { G.renderer.domElement.requestPointerLock(); } catch (e) { /* ignore */ } };
+      requestAnimationFrame(loop);
+    })
+    .catch((e) => { console.error(e); $('loading').textContent = "Couldn't load the Brisbane map data (" + e.message + '). Serve this folder over http and reload.'; });
 }
 
 window.addEventListener('load', () => setTimeout(boot, 30));

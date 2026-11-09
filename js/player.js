@@ -165,7 +165,7 @@ const Player = {
     this.vy -= 20 * dt;
     this.x += this.vx * dt; this.z += this.vz * dt; this.y += this.vy * dt;
     if (this.y < ground) { this.y = ground; this.vy = 0; }
-    this.x = clamp(this.x, -HALF + 3, HALF - 3); this.z = clamp(this.z, -HALF + 3, HALF - 3);
+    this.x = World.clampX(this.x); this.z = World.clampZ(this.z);
     const p = { x: this.x, z: this.z };
     if (collideCircle(p, 0.4, this.y)) { this.x = p.x; this.z = p.z; }
     for (const q of G.peds) {

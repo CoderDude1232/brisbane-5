@@ -15,18 +15,15 @@ You can't open the file directly from disk because browsers block the scripts it
 
 ## The city
 
-- **The Brown Snake.** The Brisbane River winds past Toowong, around the CBD peninsula, Kangaroo Point and New Farm, then out past Hamilton. CityCat ferries run along it. If you drive into it you sink.
-- **26 river crossings**, including the **Story Bridge** with its steel cantilever truss (lit up at night), Captain Cook, Victoria, Go Between, Kurilpa and Walter Taylor bridges.
-- **Suburbs:** CBD towers, Fortitude Valley neon, South Bank, West End, Woolloongabba, Paddington, New Farm, Milton, Toowong and more. Each suburb has a mix of buildings: glass towers, Queenslanders on stilts with tin roofs and verandahs, Hills Hoists, backyard pools and jacarandas in bloom.
-- **Real landmarks** (about 40, placed roughly where they stand):
-  - **CBD:** Brisbane Skytower (with its sky pool), 1 William St, Infinity Tower (lit crown), Soleil, Aurora, Riparian Plaza, Waterfront Place, 480 Queen St (diagrid), Brisbane Square (coloured boxes), and Queen's Wharf with the Sky Deck and the Neville Bonner Bridge.
-  - **Heritage:** the Treasury Building, Customs House (copper dome), City Hall and King George Square, Anzac Square and the Shrine of Remembrance, Central and Roma St stations, St Stephen's Cathedral, Parliament House and the City Botanic Gardens, and the Old Windmill.
-  - **South Bank:** GOMA, the State Library, the Queensland Museum, QPAC, the Wheel of Brisbane, Streets Beach, the BRISBANE sign, the Nepal Peace Pagoda, the Arbour and the Convention Centre.
-  - **Around town:** the Story Bridge Hotel, Kangaroo Point Cliffs, Howard Smith Wharves, Chinatown Mall, Brisbane Powerhouse, the Teneriffe woolstores, the Newstead gasworks, the Ekka, the Breakfast Creek Hotel, Eat Street, the Regatta Hotel, UQ's Great Court, Indro, Lone Pine, Mt Coot-tha Botanic Gardens, Suncorp Stadium, the Gabba and the XXXX Brewery.
-  - **Bridges:** the Kurilpa masts, the Kangaroo Point green bridge, the art-deco pylons on William Jolly / Victoria / Go Between, and the Story Bridge's steel truss.
-- **Street level:** real CBD street names (the ladies' and gents' grid of Queen, Adelaide, Ann, George, Albert, Edward, Eagle and more) shown in the HUD. Street lights, traffic signals, zebra crossings, footpath awnings, TransBlink bus stops, power poles and wires in the suburbs, wheelie bins, Hills Hoists, rainwater tanks and fences. Queenslanders, post-war brick homes and new builds. Mangroves along the river, the Riverwalk, and CityCat terminals.
-- **Wildlife:** bin chickens (ibis) wander the parks. It's spring, so magpies swoop you in the suburbs.
-- **Day/night cycle** (one game day is 16 minutes): office windows and Valley neon light up after dark.
+Real inner Brisbane, about 6 km × 6.3 km from Toowong to Bulimba and Herston to Dutton Park, built from OpenStreetMap data:
+
+- **About 23,600 buildings** on their real footprints and heights, including the full CBD skyline: Skytower, The One, 1 William St, Infinity, Soleil, Aurora, Riparian Plaza, 111 Eagle, Waterfront Place, Brisbane Square and more. Famous towers get hand-modelled detail based on reference photos.
+- **The real street network:** about 19,800 road segments with real names, lanes, one-way streets and bridges. There are about 600 working traffic lights at their real junctions, plus real crossings, bus stops and street lamps.
+- **The Brisbane River and its creeks**, traced from OSM polygons, with CityCats running between real terminals. If you drive in, you sink.
+- **Landmarks:** Story Bridge truss, Kurilpa masts, Goodwill arch, Wheel of Brisbane, Streets Beach, Customs House, City Hall clock tower, Treasury, St Stephen's, Parliament House, the XXXX sign in Milton, Suncorp Stadium, the Gabba and the Kangaroo Point Cliffs.
+- **Suburbs:** Queenslanders on stumps with verandahs, post-war brick homes, Hills Hoists, real parks and trees (jacarandas in bloom).
+- **Wildlife:** bin chickens in the parks, and swooping magpies in spring.
+- **Day/night cycle** with lit windows, street lights, a physical sky and reflections.
 
 ## Gameplay
 
@@ -56,13 +53,15 @@ You can't open the file directly from disk because browsers block the scripts it
 
 | File | What it does |
 | --- | --- |
-| `js/world.js` | River, road grid, bridges, suburbs, path-finding (pure data) |
-| `js/worldBuild.js` | Merges the city into chunked meshes: roads, generic buildings, houses, colliders, minimap image |
-| `js/landmarks.js` | Real Brisbane buildings |
+| `js/world.js` | Loads `data/brisbane.json`: road graph, water mask, path-finding, street names |
+| `js/cityBuild.js` | Builds the real city: ground cover, river, roads, every building, trees |
+| `tools/osm2game.py` | Converts OpenStreetMap downloads into `data/brisbane.json` |
+| `js/worldBuild.js` | Geometry merger, footprint helpers, colliders, textures |
+| `js/landmarks.js` | Hand-modelled landmark detail matched to OSM buildings by name |
 | `js/detail.js` | Close-up architectural detail streamed in around the camera |
 | `js/render.js` | Renderer, physical sky, reflections, bloom, day/night |
 | `js/textures.js` | Procedural PBR textures (facades, asphalt, water, foliage) |
-| `js/props.js` | Street furniture, riverbanks, CityCat terminals |
+| `js/props.js` | Working traffic lights, street furniture, riverbanks, CityCat terminals |
 | `js/models.js` | Low-poly people, cars, birds and the helicopter |
 | `js/vehicles.js` | Car physics, traffic AI, police pursuit AI, collisions |
 | `js/peds.js` | Pedestrians, ibis, magpies |
@@ -74,3 +73,7 @@ You can't open the file directly from disk because browsers block the scripts it
 | `js/main.js` | Boot, input, camera, day/night, spawning, main loop |
 
 Three.js r128 and its post-processing/sky example modules are vendored in `lib/` (MIT license); `lib/examples/Sky.js` adds a gain, night tint and stars.
+
+## Real map data
+
+The city is built from OpenStreetMap: every building footprint, road, bridge, park and the river itself (see `docs/RESEARCH.md`). Map data © OpenStreetMap contributors, ODbL 1.0.

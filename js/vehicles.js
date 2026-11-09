@@ -1,7 +1,6 @@
 'use strict';
 // Arcade car physics shared by the player, traffic and police. Australians drive on the left.
 
-const LANE = 3.5;
 
 class Vehicle {
   constructor(type, x, z, h, o = {}) {
@@ -126,8 +125,8 @@ class Vehicle {
     this.vz = fz * vf + rz * vs;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
-    this.x = clamp(this.x, -HALF + 5, HALF - 5);
-    this.z = clamp(this.z, -HALF + 5, HALF - 5);
+    this.x = World.clampX(this.x);
+    this.z = World.clampZ(this.z);
 
     // Buildings
     let nx = 0, nz = 0, hit = false, soft = true;
@@ -211,20 +210,6 @@ class Vehicle {
   }
 
   // ---- AI ----
-  laneTarget(i0, j0, i1, j1, entering) {
-    const dx = Math.sign(i1 - i0), dz = Math.sign(j1 - j0);
-    const node = entering ? [i0, j0] : [i1, j1];
-    const s = entering ? 9 : -9;
-    return [lineC(node[0]) + dx * s + dz * LANE, lineC(node[1]) + dz * s - dx * LANE];
-  }
-  chooseNext(a, b) {
-    const opts = World.neighbors(b[0], b[1]).filter((n) => n[0] !== a[0] || n[1] !== a[1]);
-    if (!opts.length) return a;
-    const dx = b[0] - a[0], dz = b[1] - a[1];
-    const straight = opts.find((n) => n[0] - b[0] === dx && n[1] - b[1] === dz);
-    if (straight && Math.random() < 0.55) return straight;
-    return pick(opts);
-  }
   obstacleAhead(look, ignoreCars) {
     const fx = Math.sin(this.h), fz = Math.cos(this.h), rx = -fz, rz = fx;
     const test = (x, z, w) => {
@@ -257,20 +242,31 @@ class Vehicle {
   }
   thinkTraffic(dt) {
     const ai = this.ai;
-    if (!ai.c) ai.c = this.chooseNext(ai.a, ai.b);
-    let tx, tz, turning = false;
-    if (ai.stage === 0) [tx, tz] = this.laneTarget(ai.a[0], ai.a[1], ai.b[0], ai.b[1], false);
-    else [tx, tz] = this.laneTarget(ai.b[0], ai.b[1], ai.c[0], ai.c[1], true);
-    const dx = ai.b[0] - ai.a[0], dz = ai.b[1] - ai.a[1];
-    turning = ai.c[0] - ai.b[0] !== dx || ai.c[1] - ai.b[1] !== dz;
-    const d = Math.hypot(tx - this.x, tz - this.z);
-    if (d < 3.5) {
-      if (ai.stage === 0) ai.stage = 1;
-      else { ai.a = ai.b; ai.b = ai.c; ai.c = this.chooseNext(ai.a, ai.b); ai.stage = 0; }
+    let E = World.edges[ai.e];
+    ai.s += Math.max(0, this.fwd) * dt;
+    ai.sync = (ai.sync || 0) - dt;
+    if (ai.sync <= 0) { // re-anchor the progress estimate to where the car really is
+      ai.sync = 0.8;
+      const s2 = projectOnEdge(ai.e, ai.dir, this.x, this.z);
+      if (Math.abs(s2 - ai.s) < 25) ai.s = s2;
     }
-    ai.lost = d > 90;
-    let want = this.cruise;
-    if (turning && (ai.stage === 1 || d < 16)) want = 6.5;
+    if (!ai.next) ai.next = pickNextEdge(ai.e, ai.dir);
+    if (ai.s >= E.len) {
+      if (ai.next) { ai.s -= E.len; ai.e = ai.next.e; ai.dir = ai.next.dir; ai.next = pickNextEdge(ai.e, ai.dir); E = World.edges[ai.e]; }
+      else { ai.s = E.len; ai.lost = true; }
+    }
+    const look = 5 + Math.abs(this.fwd) * 0.45;
+    let ts = ai.s + look, te = ai.e, td = ai.dir;
+    if (ts > E.len && ai.next) { ts -= E.len; te = ai.next.e; td = ai.next.dir; }
+    const [tx, tz] = lanePoint(te, td, ts);
+    const [cx, cz] = lanePoint(ai.e, ai.dir, ai.s);
+    ai.lost = Math.hypot(cx - this.x, cz - this.z) > 40;
+    let want = this.cruise * cruiseFactor(E);
+    if (ai.next && E.len - ai.s < 22) {
+      const a1 = World.pointAt(ai.e, ai.dir, E.len), a2 = World.pointAt(ai.next.e, ai.next.dir, 0);
+      const turn = Math.acos(clamp(a1[2] * a2[2] + a1[3] * a2[3], -1, 1));
+      if (turn > 0.5) want = Math.min(want, turn > 2.5 ? 4 : 7.5);
+    }
     ai.panic = Math.max(0, (ai.panic || 0) - dt);
     if (ai.panic > 0) want = this.spec.max * 0.7;
     ai.bumpT = Math.max(0, (ai.bumpT || 0) - dt);
@@ -284,6 +280,7 @@ class Vehicle {
         if (ai.blockT > 1.5 && !ai.honked) { ai.honked = true; if (Math.hypot(this.x - Player.x, this.z - Player.z) < 40) Sound.horn(); }
       } else if (ai.blockT > 3.5) { ai.pushT = 1.6; ai.blockT = 0; }
     } else { ai.blockT = 0; ai.honked = false; }
+    if (Signals.redAhead(this, ai)) want = 0;
     this.drive(tx, tz, want, dt);
   }
   thinkPolice(dt) {
@@ -296,11 +293,11 @@ class Vehicle {
     let want = this.spec.max * (G.wanted >= 3 ? 0.95 : 0.8);
     ai.repath = (ai.repath || 0) - dt;
     if (d > 55) {
-      if (ai.repath <= 0) { ai.path = World.path(World.nearestNode(this.x, this.z), World.nearestNode(px, pz)); ai.pi = 0; ai.repath = 1.2; }
+      if (ai.repath <= 0) { ai.path = World.path(World.nearestNode(this.x, this.z), World.nearestNode(px, pz)); ai.pi = 0; ai.repath = 1.5; }
       if (ai.path && ai.path.length) {
-        while (ai.pi < ai.path.length - 1 && Math.hypot(lineC(ai.path[ai.pi][0]) - this.x, lineC(ai.path[ai.pi][1]) - this.z) < 14) ai.pi++;
+        while (ai.pi < ai.path.length - 1 && Math.hypot(World.nodeX[ai.path[ai.pi]] - this.x, World.nodeZ[ai.path[ai.pi]] - this.z) < 12) ai.pi++;
         const n = ai.path[ai.pi];
-        tx = lineC(n[0]); tz = lineC(n[1]);
+        tx = World.nodeX[n]; tz = World.nodeZ[n];
         const turnAhead = Math.abs(angDiff(this.h, Math.atan2(tx - this.x, tz - this.z)));
         if (Math.hypot(tx - this.x, tz - this.z) < 25 && turnAhead > 0.6) want = 12;
       }
@@ -330,18 +327,49 @@ class Vehicle {
   }
 }
 
-// Put a car back into normal traffic from wherever it is.
-function toTraffic(v) {
-  const a = World.nearestNode(v.x, v.z);
-  const nb = a && World.neighbors(a[0], a[1]);
-  if (!nb || !nb.length) { v.ai = { mode: 'parked' }; return; }
-  let b = nb[0], best = -2;
-  for (const n of nb) {
-    const d = Math.sin(v.h) * Math.sign(n[0] - a[0]) + Math.cos(v.h) * Math.sign(n[1] - a[1]);
-    if (d > best) { best = d; b = n; }
+// ---- Road-following helpers ----
+// Keep left: offset from the centre line towards the left of the travel direction.
+function laneOffset(E) { return E.oneway ? (E.lanes > 1 ? -(E.w / 2 - 2) : 0) : E.w / 4 + 0.2; }
+function lanePoint(e, dir, s) {
+  const E = World.edges[e];
+  const [x, z, tx, tz] = World.pointAt(e, dir, s);
+  const o = laneOffset(E);
+  return [x + tz * o, z - tx * o, tx, tz];
+}
+function cruiseFactor(E) { return E.cls <= 1 ? 1.9 : E.cls <= 3 ? 1.3 : E.cls <= 5 ? 1.1 : E.cls >= 8 && E.cls <= 12 ? 0.9 : 0.85; }
+// Distance travelled along an edge (in travel direction) closest to a point.
+function projectOnEdge(e, dir, x, z) {
+  const E = World.edges[e];
+  let best = 0, bd = Infinity;
+  for (let k = 1; k < E.pts.length; k++) {
+    const p = E.pts[k - 1], q = E.pts[k], dx = q[0] - p[0], dz = q[1] - p[1], L2 = dx * dx + dz * dz || 1;
+    const u = clamp(((x - p[0]) * dx + (z - p[1]) * dz) / L2, 0, 1);
+    const d = (x - p[0] - dx * u) ** 2 + (z - p[1] - dz * u) ** 2;
+    if (d < bd) { bd = d; best = E.cum[k - 1] + u * (E.cum[k] - E.cum[k - 1]); }
   }
-  v.ai = { mode: 'traffic', a: [a[0] * 2 - b[0], a[1] * 2 - b[1]], b: a, stage: 1 };
-  v.ai.c = b;
+  return dir > 0 ? best : E.len - best;
+}
+// At the end of (e, dir), pick the next edge: mostly straight on, sometimes a turn, U-turn at dead ends.
+function pickNextEdge(e, dir) {
+  const E = World.edges[e];
+  const node = dir > 0 ? E.b : E.a;
+  const opts = World.carNeighbors(node).filter((it) => it.e !== e);
+  if (!opts.length) return E.oneway ? null : { e, dir: -dir };
+  const end = World.pointAt(e, dir, E.len);
+  let best = null, bd = -2;
+  for (const it of opts) { const st = World.pointAt(it.e, it.dir, 0); const d = end[2] * st[2] + end[3] * st[3]; if (d > bd) { bd = d; best = it; } }
+  const ch = bd > 0.7 && Math.random() < 0.6 ? best : pick(opts);
+  return { e: ch.e, dir: ch.dir };
+}
+// Put a car into normal traffic on the nearest drivable road, facing the way it's pointing.
+function toTraffic(v) {
+  const n = World.nearestEdge(v.x, v.z, 50, (E) => E.car);
+  if (!n) { v.ai = { mode: 'parked' }; return; }
+  const E = World.edges[n.e];
+  const [, , tx, tz] = World.pointAt(n.e, 1, n.s);
+  let dir = Math.sin(v.h) * tx + Math.cos(v.h) * tz >= 0 ? 1 : -1;
+  if (E.oneway) dir = 1;
+  v.ai = { mode: 'traffic', e: n.e, dir, s: dir > 0 ? n.s : E.len - n.s };
 }
 
 function collideCircle(p, r, y) {
@@ -349,6 +377,12 @@ function collideCircle(p, r, y) {
   let hit = false, nx = 0, nz = 0, soft = true;
   for (const b of boxes) {
     if (y !== undefined && (y + 0.3 > b.maxY || y + 1.5 < b.minY)) continue;
+    if (b.pts) { // building footprint polygon
+      if (p.x < b.minX - r || p.x > b.maxX + r || p.z < b.minZ - r || p.z > b.maxZ + r) continue;
+      const res = circlePoly(p, r, b.pts);
+      if (res) { nx += res[0]; nz += res[1]; hit = true; soft = false; }
+      continue;
+    }
     const cx = clamp(p.x, b.minX, b.maxX), cz = clamp(p.z, b.minZ, b.maxZ);
     const dx = p.x - cx, dz = p.z - cz, d2 = dx * dx + dz * dz;
     if (d2 >= r * r) continue;
@@ -368,9 +402,29 @@ function collideCircle(p, r, y) {
 }
 collideCircle._tmp = [];
 
+// Push a circle out of a polygon. Returns the push normal or null.
+function circlePoly(p, r, pts) {
+  let bd = Infinity, bx = 0, bz = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[j], b = pts[i], dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz || 1;
+    const u = clamp(((p.x - a[0]) * dx + (p.z - a[1]) * dz) / L2, 0, 1);
+    const cx = a[0] + dx * u, cz = a[1] + dz * u, d = (p.x - cx) ** 2 + (p.z - cz) ** 2;
+    if (d < bd) { bd = d; bx = cx; bz = cz; }
+  }
+  const d = Math.sqrt(bd);
+  const inside = pip(p.x, p.z, pts);
+  if (!inside && d >= r) return null;
+  let ux = p.x - bx, uz = p.z - bz;
+  const l = Math.hypot(ux, uz) || 1;
+  ux /= l; uz /= l;
+  if (inside) { ux = -ux; uz = -uz; }
+  p.x = bx + ux * r; p.z = bz + uz * r;
+  return [ux, uz];
+}
+
 function pointInBuilding(x, y, z) {
   const boxes = World.hash.query(x, z, x, z, pointInBuilding._tmp);
-  for (const b of boxes) if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < b.maxY && y > b.minY) return true;
+  for (const b of boxes) if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < b.maxY && y > b.minY && (!b.pts || pip(x, z, b.pts))) return true;
   return false;
 }
 pointInBuilding._tmp = [];
@@ -379,11 +433,35 @@ function raycastWorld(ox, oy, oz, dx, dy, dz, maxT) {
   const ex = ox + dx * maxT, ez = oz + dz * maxT;
   const boxes = World.hash.query(Math.min(ox, ex), Math.min(oz, ez), Math.max(ox, ex), Math.max(oz, ez), raycastWorld._tmp);
   let best = maxT;
-  for (const b of boxes) { const t = rayBox(ox, oy, oz, dx, dy, dz, b, best); if (t >= 0 && t < best) best = t; }
+  for (const b of boxes) {
+    const t = b.pts ? rayPrism(ox, oy, oz, dx, dy, dz, b, best) : rayBox(ox, oy, oz, dx, dy, dz, b, best);
+    if (t >= 0 && t < best) best = t;
+  }
   if (dy < -1e-4) { const tg = (World.groundY(ox, oz) - oy) / dy; if (tg > 0 && tg < best) best = tg; }
   return best;
 }
 raycastWorld._tmp = [];
+
+// Ray vs an extruded footprint (walls + roof).
+function rayPrism(ox, oy, oz, dx, dy, dz, b, maxT) {
+  if (rayBox(ox, oy, oz, dx, dy, dz, b, maxT) < 0) return -1;
+  let best = -1;
+  const pts = b.pts;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const ax = pts[j][0], az = pts[j][1], ex = pts[i][0] - ax, ez = pts[i][1] - az;
+    const den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ax - ox) * ez - (az - oz) * ex) / den, u = ((ax - ox) * dz - (az - oz) * dx) / den;
+    if (t < 0 || t > maxT || u < 0 || u > 1) continue;
+    const y = oy + dy * t;
+    if (y >= b.minY && y <= b.maxY && (best < 0 || t < best)) best = t;
+  }
+  if (dy < -1e-6) {
+    const t = (b.maxY - oy) / dy;
+    if (t > 0 && t < maxT && (best < 0 || t < best) && pip(ox + dx * t, oz + dz * t, pts)) best = t;
+  }
+  return best;
+}
 
 function collideVehicles() {
   const vs = G.vehicles;

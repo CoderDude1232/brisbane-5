@@ -1,174 +1,213 @@
 'use strict';
-// Street furniture and riverbank detail: lights, signals, crossings, bus stops, power poles,
-// bins, mangroves, the Riverwalk and CityCat terminals.
+// Street furniture placed from real OpenStreetMap features: traffic signals (working), lamps,
+// bus stops, pedestrian crossings, suburban power lines, mangroves, the Riverwalk and CityCat terminals.
+
+// ---- Working traffic lights ----
+const Signals = {
+  junctions: [], byNode: new Map(),
+  // Two phases per junction: approaches roughly parallel to the junction's main axis, then the rest.
+  group(j, tx, tz) { return Math.abs(Math.cos(Math.atan2(tx, tz) - j.axis)) > 0.7 ? 0 : 1; },
+  phase(j, t) { const c = (t + j.off) % 44; return c < 19 ? 0 : c < 22 ? 2 : c < 41 ? 1 : 3; }, // 2/3 = all-red
+  isGreen(j, grp, t) { return this.phase(j, t) === grp; },
+  redAhead(v, ai) {
+    const E = World.edges[ai.e];
+    const node = ai.dir > 0 ? E.b : E.a;
+    const j = this.byNode.get(node);
+    if (!j) return false;
+    const rem = E.len - ai.s;
+    if (rem > 26 || rem < j.r + 1) return false;
+    const [, , tx, tz] = World.pointAt(ai.e, ai.dir, E.len);
+    return !this.isGreen(j, this.group(j, tx, tz), G.t);
+  },
+  build(K, pts) {
+    for (let i = 0; i < pts.length; i += 2) {
+      const n = World.nearestNode(pts[i], pts[i + 1], true);
+      if (n === null || this.byNode.has(n)) continue;
+      const x = World.nodeX[n], z = World.nodeZ[n];
+      if (Math.hypot(x - pts[i], z - pts[i + 1]) > 28) continue;
+      const inc = World.adj[n].filter((it) => World.edges[it.e].car);
+      if (inc.length < 2) continue;
+      const first = World.pointAt(inc[0].e, inc[0].dir, 0);
+      const j = { n, x, z, axis: Math.atan2(first[2], first[3]), off: (n * 7.31) % 44, r: Math.max(...inc.map((it) => World.edges[it.e].w)) / 2, heads: [] };
+      // one pole per approach, on the kerb to the left of incoming traffic, facing it
+      for (const it of inc) {
+        const E = World.edges[it.e];
+        if (E.oneway && it.dir === 1) continue; // traffic only leaves the junction on this edge
+        const [px, pz, tx, tz] = World.pointAt(it.e, it.dir, Math.min(E.len * 0.5, j.r + 2));
+        // incoming direction is -t; its left side is (−tz, tx)... kerb at +(tz,−tx) relative to outgoing
+        const ox = px - tz * (E.w / 2 + 1.2), oz = pz + tx * (E.w / 2 + 1.2);
+        Detail.add(ox, oz, 'fn', ({ PS, P }) => { PS.box(ox, 0, oz, 0.18, 4.6, 0.18, '#3a3d40'); P.box(ox, 3.0, oz, 0.42, 1.3, 0.42, '#1f2224', Math.atan2(tx, tz)); });
+        addCol(ox - 0.2, ox + 0.2, oz - 0.2, oz + 0.2, 4.6, 0, 'prop');
+        j.heads.push({ x: ox + tx * 0.24, z: oz + tz * 0.24, grp: this.group(j, -tx, -tz) });
+      }
+      this.junctions.push(j);
+      this.byNode.set(n, j);
+    }
+    // Lamp meshes are pooled and attached to the heads near the camera.
+    const geo = new THREE.SphereGeometry(0.13, 8, 6);
+    this.mats = { r: new THREE.MeshBasicMaterial({ color: 0xff2a1a }), a: new THREE.MeshBasicMaterial({ color: 0xffb21a }), g: new THREE.MeshBasicMaterial({ color: 0x2aff6a }) };
+    this.pool = [];
+    for (let k = 0; k < 220; k++) { const m = new THREE.Mesh(geo, this.mats.r); m.visible = false; K.scene.add(m); this.pool.push(m); }
+    this.t = 0;
+  },
+  update(dt, cx, cz) {
+    this.t -= dt;
+    if (this.t > 0 || !this.pool) return;
+    this.t = 0.2;
+    let k = 0;
+    for (const j of this.junctions) {
+      if (Math.abs(j.x - cx) > 170 || Math.abs(j.z - cz) > 170) continue;
+      const ph = this.phase(j, G.t);
+      for (const h of j.heads) {
+        if (k >= this.pool.length) break;
+        const m = this.pool[k++];
+        const green = ph === h.grp, amber = (ph === 2 && h.grp === 0) || (ph === 3 && h.grp === 1);
+        m.material = green ? this.mats.g : amber ? this.mats.a : this.mats.r;
+        m.position.set(h.x, green ? 3.15 : amber ? 3.6 : 4.05, h.z);
+        m.visible = true;
+      }
+    }
+    for (; k < this.pool.length; k++) this.pool[k].visible = false;
+  },
+};
 
 function buildProps(K) {
-  const { P, PS, GR, NE, rng, rp } = K;
-  const zoneAt = (x, z) => { const b = World.blockAt(x, z); return b ? b.zone : 'suburb'; };
-  const URBAN = new Set(['cbd', 'mid', 'valley', 'southbank', 'industrial', 'park']);
-  const BUSY = new Set(['cbd', 'mid', 'valley']);
+  const { rp } = K;
+  // Visuals for small street furniture are streamed in near the camera; colliders stay resident.
+  const near = (x, z, draw) => Detail.add(x, z, 'fn', draw);
+  const d = World.data;
   const pole = '#5a5f63';
+  const nearCar = (x, z, r) => World.nearestEdge(x, z, r, (E) => !E.walk);
 
-  // Street light: pole on the footpath with an arm reaching over the road (dx,dz points at the road).
-  const streetLight = (x, z, dx, dz, h = 7.5) => {
-    PS.box(x, 0, z, 0.2, h, 0.2, pole);
-    PS.box(x + dx * 0.9, h - 0.15, z + dz * 0.9, dx ? 1.9 : 0.12, 0.12, dz ? 1.9 : 0.12, pole);
-    NE.box(x + dx * 1.75, h - 0.35, z + dz * 1.75, dx ? 0.7 : 0.35, 0.14, dz ? 0.7 : 0.35, '#fff1c8');
-    addCol(x - 0.2, x + 0.2, z - 0.2, z + 0.2, h, 0, 'prop');
+  Signals.build(K, d.pois.signals);
+
+  // ---- Street lights: real mapped lamps plus a regular run along main and inner-city roads ----
+  const lamp = (x, z, tx, tz) => { // (tx,tz) points from the lamp to the road
+    if (pointInBuilding(x, 1, z) || World.isWater(x, z)) return;
+    near(x, z, ({ PS, NE }) => {
+      PS.box(x, 0, z, 0.2, 7.5, 0.2, pole);
+      PS.beam(x, 7.4, z, x + tx * 1.9, 7.4, z + tz * 1.9, 0.12, pole);
+      NE.box(x + tx * 1.8, 7.2, z + tz * 1.8, 0.45, 0.14, 0.45, '#fff1c8');
+    });
+    addCol(x - 0.2, x + 0.2, z - 0.2, z + 0.2, 7.5, 0, 'prop');
   };
-
-  // ---- Per road segment ----
-  const edges = [];
-  for (let i = 0; i < NL - 1; i++) for (let j = 0; j < NL; j++) { const t = World.H[i * NL + j]; if (t === 1 || t === 2) edges.push({ x0: lineC(i), z0: lineC(j), x1: lineC(i + 1), z1: lineC(j), h: true, t, id: i * 31 + j * 7 }); }
-  for (let i = 0; i < NL; i++) for (let j = 0; j < NL - 1; j++) { const t = World.V[i * NL + j]; if (t === 1 || t === 2) edges.push({ x0: lineC(i), z0: lineC(j), x1: lineC(i), z1: lineC(j + 1), h: false, t, id: i * 17 + j * 29 }); }
-  for (const e of edges) {
-    const len = e.h ? e.x1 - e.x0 : e.z1 - e.z0;
-    const at = (s, off) => (e.h ? [e.x0 + s, e.z0 + off] : [e.x0 + off, e.z0 + s]);
-    if (e.t === 2) { // bridge lamps along the railings
-      for (let s = 18; s < len - 12; s += 24) for (const side of [-1, 1]) {
-        const [x, z] = at(s + (side > 0 ? 12 : 0), side * 10.6);
-        if (!World.isWater(x, z)) continue;
-        PS.box(x, 0, z, 0.2, 7, 0.2, pole);
-        NE.box(x - (e.h ? 0 : side * 0.6), 6.9, z - (e.h ? side * 0.6 : 0), e.h ? 0.35 : 0.9, 0.14, e.h ? 0.9 : 0.35, '#fff1c8');
-      }
-      continue;
-    }
-    for (const side of [-1, 1]) {
-      const [mx, mz] = at(len / 2, side * 18);
-      const zone = zoneAt(mx, mz);
-      if (zone === 'mountain' || zone === 'suburb') continue;
-      if (World.isWater(mx, mz)) continue;
-      const s = len * (side < 0 ? 0.3 : 0.7);
-      const [x, z] = at(s, side * 9.4);
-      if (!World.isWater(x, z) && !pointInBuilding(x, 1, z)) streetLight(x, z, e.h ? 0 : -side, e.h ? -side : 0);
-      // Bus stop on some urban streets
-      if (URBAN.has(zone) && (e.id + (side > 0 ? 3 : 0)) % 5 === 0) {
-        const [bx, bz] = at(len * 0.5, side * 8.9);
-        if (World.isWater(bx, bz) || pointInBuilding(bx, 1, bz)) continue;
-        const L = 3.8, alongX = e.h;
-        PS.box(bx + (alongX ? 0 : side * 0.6), 0, bz + (alongX ? side * 0.6 : 0), alongX ? L : 0.08, 2.4, alongX ? 0.08 : L, '#9fc3d8');
-        PS.box(bx, 2.4, bz, alongX ? L + 0.4 : 1.8, 0.15, alongX ? 1.8 : L + 0.4, '#3d4246');
-        PS.box(bx + (alongX ? 0 : side * 0.3), 0, bz + (alongX ? side * 0.3 : 0), alongX ? L - 0.6 : 0.5, 0.5, alongX ? 0.5 : L - 0.6, '#6d5038');
-        const [sx, sz] = at(len * 0.5 + 2.6, side * 7.6);
-        PS.box(sx, 0, sz, 0.1, 2.6, 0.1, '#888'); NE.box(sx, 2.3, sz, 0.5, 0.5, 0.06, '#ffd23a');
-        addCol(bx - (alongX ? L / 2 : 0.4), bx + (alongX ? L / 2 : 0.4), bz - (alongX ? 0.4 : L / 2), bz + (alongX ? 0.4 : L / 2), 2.6, 0, 'prop');
-      }
+  for (let i = 0; i < d.pois.lamp.length; i += 2) {
+    const x = d.pois.lamp[i], z = d.pois.lamp[i + 1], n = nearCar(x, z, 25);
+    if (!n) continue;
+    const [px, pz] = World.pointAt(n.e, 1, n.s), l = Math.hypot(px - x, pz - z) || 1;
+    lamp(x, z, (px - x) / l, (pz - z) / l);
+  }
+  for (const E of World.edges) {
+    if (E.walk || E.bridge || E.cls > 7 || E.len < 30) continue;
+    const zone = World.zoneAt(E.pts[0][0], E.pts[0][1]);
+    if (E.cls >= 5 && zone === 'suburb') continue; // suburbs: lamps hang off the power poles
+    for (let s = 15, side = 1; s < E.len - 10; s += 46, side = -side) {
+      const [x, z, tx, tz] = World.pointAt(E.i, 1, s);
+      const o = E.w / 2 + 2.2;
+      lamp(x + tz * o * side, z - tx * o * side, -tz * side, tx * side);
     }
   }
 
-  // ---- Power poles + wires along suburban streets (with the street light bolted on) ----
-  const poleLine = (pts, dirx, dirz) => {
+  // ---- Bus stops (real locations) ----
+  for (let i = 0; i < d.pois.bus.length; i += 2) {
+    const x = d.pois.bus[i], z = d.pois.bus[i + 1], n = nearCar(x, z, 20);
+    if (!n || pointInBuilding(x, 1, z) || World.isWater(x, z)) continue;
+    const [px, pz, tx, tz] = World.pointAt(n.e, 1, n.s);
+    const ry = Math.atan2(tx, tz), side = Math.sign((x - px) * tz - (z - pz) * tx) || 1;
+    const E = World.edges[n.e], o = E.w / 2 + 2.6;
+    const bx = px + tz * o * side, bz = pz - tx * o * side;
+    if (pointInBuilding(bx, 1, bz)) continue;
+    const back = [bx + tz * 0.7 * side, bz - tx * 0.7 * side];
+    near(bx, bz, ({ PS, NE }) => {
+      PS.box(back[0], 0, back[1], 0.08, 2.4, 3.8, '#9fc3d8', ry + Math.PI / 2);
+      PS.box(bx, 2.4, bz, 1.9, 0.14, 4.2, '#3d4246', ry);
+      PS.box(bx + tz * 0.35 * side, 0, bz - tx * 0.35 * side, 0.5, 0.48, 3.2, '#6d5038', ry);
+      PS.box(bx + tx * 2.6, 0, bz + tz * 2.6, 0.1, 2.6, 0.1, '#888');
+      NE.box(bx + tx * 2.6, 2.3, bz + tz * 2.6, 0.06, 0.5, 0.5, '#ffd23a');
+    });
+    addCol(bx - 1, bx + 1, bz - 1, bz + 1, 2.6, 0, 'prop');
+  }
+
+  // ---- Zebra crossings (real crossing nodes on roads) ----
+  const W = [0.49, 0.1, 0.51, 0.12];
+  for (let i = 0; i < d.pois.crossing.length; i += 2) {
+    const x = d.pois.crossing[i], z = d.pois.crossing[i + 1], n = nearCar(x, z, 3);
+    if (!n) continue;
+    const E = World.edges[n.e];
+    if (E.cls <= 1 || E.cls >= 8) continue;
+    const [px, pz, tx, tz] = World.pointAt(n.e, 1, n.s);
+    near(px, pz, ({ RD }) => {
+      for (let k = -Math.floor(E.w / 2 / 1.1); k <= Math.floor(E.w / 2 / 1.1); k++) {
+        const cx = px + tz * k * 1.1, cz = pz - tx * k * 1.1;
+        RD.add(UNIT_BOX, M(cx, 0.08, cz, 0.55, 0.02, 3.2, 0, Math.atan2(tx, tz), 0), '#ffffff', () => W);
+      }
+    });
+  }
+
+  // ---- Power poles and wires along suburban streets (with lamps bolted on) ----
+  for (const E of World.edges) {
+    if (E.walk || E.cls < 5 || E.cls > 7 || E.len < 25) continue;
+    if (World.zoneAt(E.pts[0][0], E.pts[0][1]) === 'cbd') continue;
     let prev = null;
-    for (const p of pts) {
-      if (!p) { prev = null; continue; }
-      const [x, z] = p;
-      PS.box(x, 0, z, 0.32, 9, 0.32, '#6b5844');
-      PS.box(x, 8.4, z, dirz ? 2.6 : 0.16, 0.16, dirz ? 0.16 : 2.6, '#6b5844');
+    for (let s = 10; s < E.len - 5; s += 42) {
+      const [x0, z0, tx, tz] = World.pointAt(E.i, 1, s);
+      const o = E.w / 2 + 2.4, x = x0 + tz * o, z = z0 - tx * o;
+      if (pointInBuilding(x, 1, z) || World.isWater(x, z)) { prev = null; continue; }
+      const pv = prev, withLamp = (s / 42) % 2 < 1;
+      near(x, z, ({ PS, NE }) => {
+        PS.box(x, 0, z, 0.32, 9, 0.32, '#6b5844');
+        PS.box(x, 8.4, z, 2.6, 0.16, 0.16, '#6b5844', Math.atan2(tz, -tx));
+        if (withLamp) { PS.beam(x, 6.6, z, x - tz * 1.8, 6.6, z + tx * 1.8, 0.1, pole); NE.box(x - tz * 1.7, 6.45, z + tx * 1.7, 0.4, 0.12, 0.4, '#fff1c8'); }
+        if (pv) for (const off of [-1.1, 1.1]) PS.beam(pv[0] + pv[2] * off, 8.5, pv[1] + pv[3] * off, x + tx * off, 8.5, z + tz * off, 0.04, '#2a2a2a');
+      });
       addCol(x - 0.25, x + 0.25, z - 0.25, z + 0.25, 9, 0, 'prop');
-      if (rng() < 0.5) { PS.box(x + dirx * 0.9, 6.6, z + dirz * 0.9, dirx ? 1.8 : 0.1, 0.1, dirx ? 0.1 : 1.8, pole); NE.box(x + dirx * 1.7, 6.45, z + dirz * 1.7, dirx ? 0.6 : 0.3, 0.12, dirx ? 0.3 : 0.6, '#fff1c8'); }
-      if (prev) for (const o of [-1.1, 1.1]) {
-        const ox = dirz ? o : 0, oz = dirx ? o : 0;
-        PS.beam(prev[0] + ox, 8.5, prev[1] + oz, x + ox, 8.5, z + oz, 0.05, '#2a2a2a');
-      }
-      prev = p;
-    }
-  };
-  for (let j = 0; j < NL; j++) { // along horizontal streets, south footpath
-    const pts = [];
-    for (let i = 0; i < NL - 1; i++) {
-      const ok = World.H[i * NL + j] === 1 && zoneAt(lineC(i) + 30, lineC(j) + 18) === 'suburb';
-      for (const s of [15, 45]) { const x = lineC(i) + s, z = lineC(j) + 9.5; pts.push(ok && !World.isWater(x, z) ? [x, z] : null); }
-    }
-    poleLine(pts, 0, -1);
-  }
-  for (let i = 0; i < NL; i++) { // along vertical streets, east footpath
-    const pts = [];
-    for (let j = 0; j < NL - 1; j++) {
-      const ok = World.V[i * NL + j] === 1 && zoneAt(lineC(i) + 18, lineC(j) + 30) === 'suburb';
-      for (const s of [15, 45]) { const x = lineC(i) + 9.5, z = lineC(j) + s; pts.push(ok && !World.isWater(x, z) ? [x, z] : null); }
-    }
-    poleLine(pts, -1, 0);
-  }
-
-  // ---- Intersections: signals, zebra crossings, bins ----
-  for (let i = 0; i < NL; i++) for (let j = 0; j < NL; j++) {
-    const nb = World.neighbors(i, j);
-    if (nb.length < 3) continue;
-    const x = lineC(i), z = lineC(j);
-    const zones = [zoneAt(x + 18, z + 18), zoneAt(x - 18, z - 18), zoneAt(x + 18, z - 18), zoneAt(x - 18, z + 18)];
-    const busy = zones.filter((zz) => BUSY.has(zz)).length >= 2;
-    if (!busy) continue;
-    for (const [cx, cz, ph] of [[1, 1, 0], [-1, -1, 0], [1, -1, 1], [-1, 1, 1]]) {
-      const px = x + cx * 9.4, pz = z + cz * 9.4;
-      if (World.isWater(px, pz) || pointInBuilding(px, 1, pz)) continue;
-      PS.box(px, 0, pz, 0.18, 4.4, 0.18, '#3a3d40');
-      PS.box(px, 2.9, pz, 0.45, 1.4, 0.45, '#1f2224');
-      NE.box(px - cz * 0.24, ph ? 3.9 : 3.15, pz + cx * 0.24, 0.25, 0.25, 0.25, ph ? '#ff2a2a' : '#2aff5a');
-      addCol(px - 0.25, px + 0.25, pz - 0.25, pz + 0.25, 4.4, 0, 'prop');
-      if (rng() < 0.35) { // public bin (and a bin chicken magnet)
-        const bx = px - cx * 2.2, bz = pz;
-        PS.cyl(bx, 0, bz, 0.35, 1.0, '#2f6b3a', 8); PS.cyl(bx, 1.0, bz, 0.4, 0.12, '#e3c21b', 8);
-      }
-    }
-    for (const [ni, nj] of nb) { // zebra crossing on each approach
-      const dx = ni - i, dz = nj - j;
-      for (let k = -3; k <= 3; k++) {
-        const W = [0.49, 0.1, 0.51, 0.12];
-        if (dx) K.RD.quad(x + dx * 7.6 - (dx < 0 ? 2.2 : 0), z + k * 1.9 - 0.5, x + dx * 7.6 + (dx > 0 ? 2.2 : 0), z + k * 1.9 + 0.5, 0.1, '#ffffff', W);
-        else K.RD.quad(x + k * 1.9 - 0.5, z + dz * 7.6 - (dz < 0 ? 2.2 : 0), x + k * 1.9 + 0.5, z + dz * 7.6 + (dz > 0 ? 2.2 : 0), 0.1, '#ffffff', W);
-      }
+      prev = [x, z, tx, tz];
     }
   }
 
-  // ---- Riverbanks: mangroves, the Riverwalk and CityCat terminals ----
-  const pts = World.river, n = pts.length;
-  const nearRoad = (x, z) => { const dx = Math.abs(x - Math.round((x - ORIGIN) / GRID) * GRID - ORIGIN), dz = Math.abs(z - Math.round((z - ORIGIN) / GRID) * GRID - ORIGIN); return dx < 12 || dz < 12; };
-  const walkZones = new Set(['cbd']);
-  for (let k = 2; k < n - 2; k += 2) {
-    const a = pts[k - 2], b = pts[k + 2], p = pts[k];
-    let tx = b.x - a.x, tz = b.z - a.z; const l = Math.hypot(tx, tz); tx /= l; tz /= l;
-    const nx = -tz, nz = tx;
-    for (const side of [-1, 1]) {
-      const lx = p.x + nx * side * (RIVER_HW + 6), lz = p.z + nz * side * (RIVER_HW + 6);
-      if (World.isWater(lx, lz)) continue;
-      const zone = zoneAt(lx, lz);
-      const sub = World.suburbAt(lx, lz)[0];
-      if (walkZones.has(zone) || sub === 'New Farm' || sub === 'Kangaroo Point') {
-        // Riverwalk boardwalk floating just off the bank
-        const wx = p.x + nx * side * (RIVER_HW - 1.5), wz = p.z + nz * side * (RIVER_HW - 1.5);
-        if (World.onBridge(wx, wz)) continue;
-        PS.add(UNIT_BOX, M(wx, 0.25, wz, 4, 0.35, 8.4, 0, Math.atan2(tx, tz), 0), '#b9b2a2');
-        const rx = wx - nx * side * 2, rz = wz - nz * side * 2;
-        PS.add(UNIT_BOX, M(rx, 1.0, rz, 0.08, 0.08, 8.4, 0, Math.atan2(tx, tz), 0), '#777');
-        if (k % 8 === 0) { PS.box(rx, 0.4, rz, 0.1, 0.7, 0.1, '#777'); NE.box(rx, 1.15, rz, 0.15, 0.15, 0.15, '#fff1c8'); }
+  const { PS } = K;
+  // ---- Riverbanks: mangroves in the suburbs, the Riverwalk boardwalk past the CBD and New Farm ----
+  for (const w of d.water) {
+    if (w.t !== 'river') continue;
+    const pts = unflat(w.p);
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k], b = pts[(k + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 1 || a[0] < World.bounds.x0 || a[0] > World.bounds.x1 || a[1] < World.bounds.z0 || a[1] > World.bounds.z1) continue;
+      const tx = (b[0] - a[0]) / L, tz = (b[1] - a[1]) / L;
+      const sub = World.suburbAt(a[0], a[1])[0];
+      // which side is land?
+      const lx = a[0] + tz * 4, lz = a[1] - tx * 4, landSide = World.isWater(lx, lz) ? -1 : 1;
+      if (sub === 'Brisbane CBD' || sub === 'New Farm' || sub === 'Kangaroo Point') {
+        if (L > 3 && !World.onBridge(a[0], a[1])) {
+          const ox = -tz * 3 * landSide, oz = tx * 3 * landSide;
+          PS.add(UNIT_BOX, M((a[0] + b[0]) / 2 + ox, 0.25, (a[1] + b[1]) / 2 + oz, 4, 0.35, L + 0.3, 0, Math.atan2(tx, tz), 0), '#b9b2a2');
+          PS.add(UNIT_BOX, M((a[0] + b[0]) / 2 + ox * 1.66, 1.0, (a[1] + b[1]) / 2 + oz * 1.66, 0.08, 0.08, L + 0.3, 0, Math.atan2(tx, tz), 0), '#777');
+        }
         continue;
       }
-      if (zone === 'southbank' || zone === 'cbd' || nearRoad(lx, lz) || k % 4) continue;
-      for (let c = 0; c < 2; c++) {
-        const mx = p.x + nx * side * (RIVER_HW + rand(0, 3)), mz = p.z + nz * side * (RIVER_HW + rand(0, 3));
-        if (World.onBridge(mx, mz)) continue;
-        PS.add(ICO, M(mx + rand(-2, 2), 0.7, mz + rand(-2, 2), rand(2, 3.2), rand(1, 1.6), rand(2, 3.2), 0, rand(0, 3)), rp(['#2f4f2a', '#38592f', '#2a4626']));
+      if (World.zoneAt(a[0], a[1]) === 'southbank' || World.onBridge(a[0], a[1]) || (k % 3)) continue;
+      for (let s = 0; s < L; s += 7) {
+        const mx = a[0] + tx * s - tz * 2 * landSide * -1, mz = a[1] + tz * s + tx * 2 * landSide * -1;
+        if (nearCar(mx, mz, 8)) continue;
+        const c = rp(['#2f4f2a', '#38592f', '#2a4626']), mtx = M(mx + rand(-1.5, 1.5), 0.7, mz + rand(-1.5, 1.5), rand(2, 3.2), rand(1, 1.6), rand(2, 3.2), 0, rand(0, 3));
+        near(mx, mz, ({ PS }) => PS.add(ICO, mtx, c));
       }
     }
   }
-  World.labels.push({ name: 'Brisbane Riverwalk', x: 470, z: -150, r: 40 });
+  World.labels.push({ name: 'Brisbane Riverwalk', x: ll(-27.4640, 153.0400)[0], z: ll(-27.4640, 153.0400)[1], r: 60 });
 
-  const terminals = [['Eagle St Pier', 150, -40], ['North Quay', -250, 200], ['South Bank', 30, 238], ['New Farm Park', 520, 60],
-    ['Bulimba', 590, -40], ['Hawthorne', 560, 140], ['Regatta', -650, 95], ['UQ St Lucia', -760, 90], ['Mowbray Park', 430, 90], ['Teneriffe', 640, -380]];
-  for (const [name, tx, tz] of terminals) {
-    let best = null, bd = 1e9;
-    for (const p of pts) { const d = (p.x - tx) ** 2 + (p.z - tz) ** 2; if (d < bd) { bd = d; best = p; } }
+  // ---- CityCat terminals (real ones) ----
+  for (const [x, z, name] of d.pois.ferry) {
+    // find the water direction
+    let best = null;
+    for (let a = 0; a < 16; a++) { const ang = (a / 16) * TAU; for (let r = 4; r <= 40; r += 4) { if (World.inRiver(x + Math.cos(ang) * r, z + Math.sin(ang) * r)) { if (!best || r < best[1]) best = [ang, r]; break; } } }
     if (!best) continue;
-    const ux = (tx - best.x), uz = (tz - best.z), ul = Math.hypot(ux, uz) || 1;
-    const px = best.x + (ux / ul) * (RIVER_HW - 6), pz = best.z + (uz / ul) * (RIVER_HW - 6);
-    const ry = Math.atan2(ux, uz);
-    PS.add(UNIT_BOX, M(px, 0.3, pz, 12, 0.6, 6, 0, ry, 0), '#d8d6d0');
-    PS.add(UNIT_BOX, M(px, 3.2, pz, 10, 0.2, 5, 0, ry, 0), '#1f4ea8');
-    for (const [a, c] of [[-4.5, -2], [4.5, -2], [-4.5, 2], [4.5, 2]]) {
-      const cos = Math.cos(ry), sin = Math.sin(ry);
-      PS.box(px + a * cos + c * sin, 0.6, pz - a * sin + c * cos, 0.15, 2.6, 0.15, '#ddd');
-    }
-    PS.add(UNIT_BOX, M(px + (ux / ul) * 6, 0.9, pz + (uz / ul) * 6, 2, 0.3, 7, 0, ry, 0), '#a8a6a0');
+    const ux = Math.cos(best[0]), uz = Math.sin(best[0]);
+    const px = x + ux * (best[1] + 6), pz = z + uz * (best[1] + 6), ry = Math.atan2(ux, uz);
+    PS.add(UNIT_BOX, M(px, 0.3, pz, 13, 0.6, 6, 0, ry, 0), '#d8d6d0');
+    PS.add(UNIT_BOX, M(px, 3.2, pz, 11, 0.2, 5, 0, ry, 0), '#1f4ea8');
+    for (const [a, c] of [[-4.5, -2], [4.5, -2], [-4.5, 2], [4.5, 2]]) { const co = Math.cos(ry), si = Math.sin(ry); PS.box(px + a * co + c * si, 0.6, pz - a * si + c * co, 0.15, 2.6, 0.15, '#ddd'); }
+    PS.add(UNIT_BOX, M((x + px) / 2, 0.9, (z + pz) / 2, 2, 0.3, Math.hypot(px - x, pz - z), 0, ry, 0), '#a8a6a0');
     World.labels.push({ name: 'CityCat: ' + name, x: px, z: pz, r: 14 });
   }
 }

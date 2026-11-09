@@ -50,16 +50,13 @@ const Police = {
 
   spawnCar() {
     const px = Player.x, pz = Player.z;
-    for (let tries = 0; tries < 20; tries++) {
-      const a = Math.random() * TAU, r = rand(130, 190);
-      const n = World.nearestNode(px + Math.sin(a) * r, pz + Math.cos(a) * r);
+    for (let tries = 0; tries < 12; tries++) {
+      const a = Math.random() * TAU, r = rand(140, 220);
+      const n = World.nearestEdge(px + Math.sin(a) * r, pz + Math.cos(a) * r, 80, (E) => E.car);
       if (!n) continue;
-      const nb = World.neighbors(n[0], n[1]);
-      if (!nb.length) continue;
-      const x = lineC(n[0]), z = lineC(n[1]);
-      if (Math.hypot(x - px, z - pz) < 100) continue;
-      const h = Math.atan2(px - x, pz - z);
-      const v = new Vehicle('police', x, z, h, { driver: 'cop', ai: { mode: 'police', crew: 2 } });
+      const [x, z] = World.pointAt(n.e, 1, n.s);
+      if (Math.hypot(x - px, z - pz) < 100 || World.inRiver(x, z)) continue;
+      const v = new Vehicle('police', x, z, Math.atan2(px - x, pz - z), { driver: 'cop', ai: { mode: 'police', crew: 2 } });
       v.siren = true;
       return v;
     }

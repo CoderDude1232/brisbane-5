@@ -37,38 +37,39 @@ const Detail = {
     for (let i = 0; i < n; i++) this.build(want[i][1]);
   },
   build(k) {
-    const K = { P: new Merger(), PS: new Merger(), G: new Merger(), NE: new Merger() };
+    const K = { P: new Merger(), PS: new Merger(), G: new Merger(), NE: new Merger(), RD: new Merger() };
     for (const it of this.items.get(k)) DETAIL_BUILDERS[it.kind](K, it.p);
     const meshes = [
       ...K.P.build(MAT.plain, G.scene, true, true),
       ...K.PS.build(MAT.plain, G.scene, false, true),
       ...K.G.build(MAT.glass, G.scene, false, true),
       ...K.NE.build(MAT.neon, G.scene, false, false),
+      ...K.RD.build(MAT.road, G.scene, false, true),
     ];
     this.built.set(k, meshes);
   },
 };
 
-// Local frame for a house facing +z (faceZ = 1) or -z (faceZ = -1): returns world coords.
-function houseFrame(x, z, f) { return (lx, lz) => [x + lx * f, z + lz * f]; }
+// Local frame for a house: local +z faces the street, rotated by ang about Y.
+function houseFrame(x, z, ang) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  return (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c];
+}
 
 const DETAIL_BUILDERS = {
-  // ---- Queenslander: stumps, verandah posts + balustrade, windows, stairs, finial, yard ----
+  fn(K, draw) { draw(K); },
+  // ---- Queenslander: stumps, lattice, verandah posts + balustrade, windows, door, stairs, finial ----
   qld(K, p) {
     const { P, PS, G: Gl } = K;
-    const { x, z, f, W, D, trim, roof, wall, gable, lot0, lot1 } = p;
-    const r = mulberry32(p.seed), rr = (a, b) => a + r() * (b - a);
-    const at = houseFrame(x, z, f);
-    const box = (M_, lx, y, lz, w, h, d, c) => { const [wx, wz] = at(lx, lz); M_.box(wx, y, wz, w, h, d, c); };
-    // stumps under the house (seen through the gap above the lattice)
+    const { x, z, ang, W, D, trim, roof, wall, gable } = p;
+    const r = mulberry32(p.seed);
+    const at = houseFrame(x, z, ang);
+    const box = (M_, lx, y, lz, w, h, d, c) => { const [wx, wz] = at(lx, lz); M_.box(wx, y, wz, w, h, d, c, ang); };
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) box(PS, i * (W / 2 - 0.4), 0, j * (D / 2 - 0.4), 0.22, 2.1, 0.22, '#7a6a58');
-    // lattice battens on the skirt (diagonal look from a few slats)
-    for (let k = -4; k <= 4; k++) { box(PS, k * (W / 9), 0.2, D / 2 - 0.2, 0.06, 1.6, 0.04, '#e8e4da'); }
-    // weatherboard trims
+    for (let k = -4; k <= 4; k++) box(PS, k * (W / 9), 0.2, D / 2 - 0.42, 0.06, 1.6, 0.04, '#e8e4da');
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(PS, sx * (W / 2 + 0.03), 2.1, sz * (D / 2 + 0.03), 0.16, 3.2, 0.16, trim);
     const wb = shadeHex(wall, 0.84);
     for (let y = 2.5; y < 5.2; y += 0.42) { box(PS, 0, y, -D / 2 - 0.02, W, 0.04, 0.03, wb); box(PS, -W / 2 - 0.02, y, 0, 0.03, 0.04, D, wb); box(PS, W / 2 + 0.02, y, 0, 0.03, 0.04, D, wb); }
-    // windows: frames, glass, sunhoods on three sides
     const win = (lx, lz, side) => {
       const along = side === 0 ? [1.3, 0.1] : [0.1, 1.3];
       const out = side === 0 ? [0, 0.06 * Math.sign(lz)] : [0.06 * Math.sign(lx), 0];
@@ -77,55 +78,53 @@ const DETAIL_BUILDERS = {
       box(PS, lx + out[0] * 2.5, 3.5, lz + out[1] * 2.5, along[0] + 0.25, 0.04, along[1] + 0.04, trim);
       box(P, lx + out[0] * 9, 4.55, lz + out[1] * 9, side === 0 ? 1.8 : 0.7, 0.08, side === 0 ? 0.7 : 1.8, roof);
     };
-    for (const lx of [-W / 2 + 1.8, W / 2 - 1.8]) win(lx, D / 2 + 0.02, 0);
-    for (const lz of [-D / 4, D / 4]) { win(-W / 2 - 0.02, lz, 1); win(W / 2 + 0.02, lz, 1); }
-    win(0, -D / 2 - 0.02, 0);
-    // front door with fanlight
-    box(PS, 0, 2.1, D / 2 + 0.06, 1.1, 2.3, 0.1, rp2(r, ['#7a1f3d', '#2e5d4b', '#3a5f8a', '#6b4f3a']));
-    box(Gl, 0, 4.45, D / 2 + 0.08, 1.0, 0.35, 0.06, '#cfe0ea');
-    // verandah: posts, top rail, bottom rail, balusters, brackets
-    const vz = D / 2 + 2.5;
-    const nPost = 5;
-    for (let k = 0; k < nPost; k++) {
-      const lx = -W / 2 + 0.15 + (k / (nPost - 1)) * (W - 0.3);
-      box(PS, lx, 2.1, vz, 0.16, 2.9, 0.16, trim);
-      box(PS, lx + 0.3, 4.6, vz, 0.5, 0.06, 0.06, trim); box(PS, lx - 0.3, 4.6, vz, 0.5, 0.06, 0.06, trim);
+    // Verandah across the street front, set into the footprint
+    const vz = D / 2 - 1.3;
+    if (W > 6) {
+      for (const lx of [-W / 2 + 1.8, W / 2 - 1.8]) win(lx, vz - 1.3, 0);
+      box(PS, 0, 2.1, vz - 1.2, 1.1, 2.3, 0.1, rp2(r, ['#7a1f3d', '#2e5d4b', '#3a5f8a', '#6b4f3a']));
+      for (let k = 0; k < 5; k++) {
+        const lx = -W / 2 + 0.15 + (k / 4) * (W - 0.3);
+        box(PS, lx, 2.1, D / 2 - 0.1, 0.16, 2.9, 0.16, trim);
+        box(PS, lx + 0.3, 4.6, D / 2 - 0.1, 0.5, 0.06, 0.06, trim); box(PS, lx - 0.3, 4.6, D / 2 - 0.1, 0.5, 0.06, 0.06, trim);
+      }
+      box(PS, 0, 3.05, D / 2 - 0.1, W, 0.08, 0.12, trim); box(PS, 0, 2.25, D / 2 - 0.1, W, 0.06, 0.1, trim);
+      for (let lx = -W / 2 + 0.3; lx < W / 2 - 0.2; lx += 0.32) if (Math.abs(lx - (W / 2 - 1.5)) > 0.8) box(PS, lx, 2.25, D / 2 - 0.1, 0.05, 0.8, 0.05, trim);
+      box(PS, 0, 4.5, D / 2 - 0.1, W, 0.25, 0.06, trim);
+      const sx0 = W / 2 - 1.5;
+      for (let k = 0; k < 7; k++) box(P, sx0, 2.1 - (k + 1) * 0.3, D / 2 + 0.2 + k * 0.3, 1.3, 0.08, 0.32, '#9a7f62');
+      for (const sd of [-0.7, 0.7]) { const [ax, az] = at(sx0 + sd, D / 2 - 0.1); const [bx2, bz] = at(sx0 + sd, D / 2 + 2.2); P.beam(ax, 3.0, az, bx2, 0.9, bz, 0.06, trim); }
     }
-    box(PS, 0, 3.05, vz, W, 0.08, 0.12, trim); box(PS, 0, 2.25, vz, W, 0.06, 0.1, trim);
-    for (let lx = -W / 2 + 0.3; lx < W / 2 - 0.2; lx += 0.32) if (Math.abs(lx - (W / 2 - 1.5)) > 0.8) box(PS, lx, 2.25, vz, 0.05, 0.8, 0.05, trim);
-    box(PS, 0, 4.5, vz, W, 0.25, 0.06, trim); // frieze
-    // stairs with treads and handrails down to the path
-    const sx0 = W / 2 - 1.5;
-    for (let k = 0; k < 7; k++) box(P, sx0, 2.1 - (k + 1) * 0.3, vz + 0.35 + k * 0.3, 1.3, 0.08, 0.32, '#9a7f62');
-    for (const s of [-0.7, 0.7]) { const [ax, az] = at(sx0 + s, vz); const [bx2, bz] = at(sx0 + s, vz + 2.4); P.beam(ax, 3.0, az, bx2, 0.9, bz, 0.06, trim); }
-    // gable end decoration / finial
-    if (gable) { box(PS, 0, 5.8, D / 2 + 2.7, 1.2, 0.8, 0.05, trim); }
-    else { const [fx, fz] = at(0, 1.2); PS.cyl(fx, 7.7, fz, 0.06, 0.8, trim, 6); }
-    // downpipe + gutter
+    for (const lz of [-D / 4, D / 6]) { win(-W / 2 - 0.02, lz, 1); win(W / 2 + 0.02, lz, 1); }
+    win(0, -D / 2 - 0.02, 0);
+    if (gable) box(PS, 0, 5.8, D / 2 + 0.25, 1.2, 0.8, 0.05, trim);
+    else { const [fx, fz] = at(0, 0); PS.cyl(fx, 7.6, fz, 0.06, 0.8, trim, 6); }
     box(PS, W / 2 + 0.1, 0, -D / 2 + 0.2, 0.1, 5.3, 0.1, '#c8cccf');
     yardDetail(K, p, r);
   },
 
   lowset(K, p) {
     const { PS, G: Gl } = K;
-    const { x, z, f, W, D } = p;
+    const { x, z, ang, W, D } = p;
     const r = mulberry32(p.seed);
-    const at = houseFrame(x, z, f);
-    const box = (M_, lx, y, lz, w, h, d, c) => { const [wx, wz] = at(lx, lz); M_.box(wx, y, wz, w, h, d, c); };
+    const at = houseFrame(x, z, ang);
+    const box = (M_, lx, y, lz, w, h, d, c) => { const [wx, wz] = at(lx, lz); M_.box(wx, y, wz, w, h, d, c, ang); };
     for (const lx of [-W / 4, W / 4]) { box(PS, lx, 0.9, D / 2 + 0.05, 1.8, 1.4, 0.1, '#f2f0ea'); box(Gl, lx, 1.0, D / 2 + 0.08, 1.6, 1.2, 0.06, '#9fb4c4'); }
     box(PS, 0, 0, D / 2 + 0.06, 1.0, 2.2, 0.08, rp2(r, ['#6b4f3a', '#f2f0ea', '#2e5d4b']));
     box(PS, 0, 2.3, D / 2 + 0.9, 2.4, 0.12, 1.8, '#b5562f');
     for (const s of [-1, 1]) box(PS, s * 1.1, 0, D / 2 + 1.7, 0.1, 2.3, 0.1, '#f2f0ea');
+    for (const lz of [-D / 4, D / 4]) for (const sx of [-1, 1]) { box(PS, sx * (W / 2 + 0.05), 0.9, lz, 0.1, 1.4, 1.6, '#f2f0ea'); box(Gl, sx * (W / 2 + 0.08), 1.0, lz, 0.06, 1.2, 1.4, '#9fb4c4'); }
     yardDetail(K, p, r);
   },
 
   modern(K, p) {
-    const { PS } = K;
+    const { PS, G: Gl } = K;
     const r = mulberry32(p.seed);
-    const at = houseFrame(p.x, p.z, p.f);
-    const [ax, az] = at(0, p.D / 2 + 1.2);
-    PS.box(ax, 3.1, az, p.W * 0.6, 0.15, 2.4, '#2a2a2a');
-    for (let k = -3; k <= 3; k++) { const [bx2, bz] = at(k * (p.W / 7), p.D / 2 + 0.1); PS.box(bx2, 3.3, bz, 0.12, 2.8, 0.25, '#6b5a48'); }
+    const at = houseFrame(p.x, p.z, p.ang);
+    const box = (M_, lx, y, lz, w, h, d, c) => { const [wx, wz] = at(lx, lz); M_.box(wx, y, wz, w, h, d, c, p.ang); };
+    box(Gl, 0, 0.4, p.D / 2 + 0.08, p.W * 0.6, 2.4, 0.1, '#7f97a8');
+    box(PS, 0, 3.1, p.D / 2 + 1.2, p.W * 0.6, 0.15, 2.4, '#2a2a2a');
+    for (let k = -3; k <= 3; k++) box(PS, k * (p.W / 7), 3.3, p.D / 2 + 0.1, 0.12, 2.8, 0.25, '#6b5a48');
     yardDetail(K, p, r);
   },
 
@@ -192,28 +191,21 @@ const DETAIL_BUILDERS = {
 
 function yardDetail(K, p, r) {
   const { PS, P } = K;
-  const { x, z, f, lot0, lot1 } = p;
-  const frontZ = z + f * 9.2;
-  const fence = p.fence;
-  for (let fx = lot0 + 0.2; fx < lot1 - 0.1; fx += fence === '#f4f4f0' ? 0.35 : 1.8) {
-    if (Math.abs(fx - x) < 1.8) continue;
-    if (fence === '#f4f4f0') PS.box(fx, 0, frontZ, 0.09, 1.05, 0.04, fence);
-    else PS.box(fx, 0, frontZ, 1.75, 1.6, 0.05, fence);
+  const at = houseFrame(p.x, p.z, p.ang);
+  // letterbox and wheelie bin out the front
+  const [lx, lz] = at(-1.6, p.D / 2 + 3.2);
+  if (!pointInBuilding(lx, 1, lz)) {
+    PS.box(lx, 0, lz, 0.1, 1.1, 0.1, '#777');
+    PS.box(lx, 1.1, lz, 0.45, 0.35, 0.4, rp2(r, ['#c23', '#eee', '#335', '#c90']), p.ang);
+    if (r() < 0.45) { const [bx2, bz] = at(1.6, p.D / 2 + 3.4); PS.box(bx2, 0, bz, 0.6, 1.0, 0.7, '#2f6b3a', p.ang); PS.box(bx2, 1.0, bz, 0.66, 0.08, 0.76, rp2(r, ['#c8302a', '#e3c21b']), p.ang); }
   }
-  if (fence === '#f4f4f0') { PS.box((lot0 + x - 1.8) / 2, 0.75, frontZ - 0.04 * f, x - 1.8 - lot0, 0.08, 0.05, fence); PS.box((x + 1.8 + lot1) / 2, 0.75, frontZ - 0.04 * f, lot1 - x - 1.8, 0.08, 0.05, fence); }
-  // letterbox, bin
-  PS.box(x - 2.4, 0, frontZ + f * 0.2, 0.1, 1.1, 0.1, '#777');
-  PS.box(x - 2.4, 1.1, frontZ + f * 0.2, 0.45, 0.35, 0.4, rp2(r, ['#c23', '#eee', '#335', '#c90']));
-  if (r() < 0.45) { const bx2 = x + 2.6, bz = frontZ + f * 0.8; PS.box(bx2, 0, bz, 0.6, 1.0, 0.7, '#2f6b3a'); PS.box(bx2, 1.0, bz, 0.66, 0.08, 0.76, rp2(r, ['#c8302a', '#e3c21b'])); }
-  // concrete path to the door
-  // Hills Hoist in the backyard
-  const by = z - f * 7.2;
-  if (p.hoist) {
-    const hx = x + (r() - 0.5) * 6;
-    PS.box(hx, 0, by, 0.1, 2.3, 0.1, '#bbbbbb');
-    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.4; P.beam(hx, 2.25, by, hx + Math.cos(a) * 1.9, 2.0, by + Math.sin(a) * 1.9, 0.05, '#bbbbbb'); }
-    for (const rr2 of [0.8, 1.4, 1.9]) for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.4, b = a + Math.PI / 2; PS.beam(hx + Math.cos(a) * rr2, 2.1, by + Math.sin(a) * rr2, hx + Math.cos(b) * rr2, 2.1, by + Math.sin(b) * rr2, 0.02, '#999'); }
-    if (r() < 0.6) PS.box(hx + 0.8, 1.3, by, 0.6, 0.8, 0.02, rp2(r, ['#d23', '#3a7bff', '#fff', '#e3c21b']));
+  // Hills Hoist in the backyard (only if there's room)
+  const [hx, hz] = at((r() - 0.5) * 3, -p.D / 2 - 4.5);
+  if (p.hoist && !pointInBuilding(hx, 1, hz) && !World.isWater(hx, hz)) {
+    PS.box(hx, 0, hz, 0.1, 2.3, 0.1, '#bbbbbb');
+    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.4; P.beam(hx, 2.25, hz, hx + Math.cos(a) * 1.9, 2.0, hz + Math.sin(a) * 1.9, 0.05, '#bbbbbb'); }
+    for (const rr2 of [0.8, 1.4, 1.9]) for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.4, b = a + Math.PI / 2; PS.beam(hx + Math.cos(a) * rr2, 2.1, hz + Math.sin(a) * rr2, hx + Math.cos(b) * rr2, 2.1, hz + Math.sin(b) * rr2, 0.02, '#999'); }
+    if (r() < 0.6) PS.box(hx + 0.8, 1.3, hz, 0.6, 0.8, 0.02, rp2(r, ['#d23', '#3a7bff', '#fff', '#e3c21b']));
   }
 }
 

@@ -1,342 +1,220 @@
 'use strict';
-// Brisbane: river, road grid, suburbs, bridges. Pure data generation (no THREE) lives here
-// so it can be sanity-checked headless; meshes are built in worldBuild.js.
+// Real inner Brisbane, built from OpenStreetMap data (data/brisbane.json, made by tools/osm2game.py).
+// Map data (c) OpenStreetMap contributors, ODbL 1.0.
+// Frame: metres, x = east, z = south, origin at Brisbane City Hall.
 
-const GRID = 60, NL = 35, ORIGIN = -1020, HALF = 1020, ROADW = 14, SIDEW = 20;
-const NB = NL - 1;
-const RIVER_HW = 30;
-const MCELL = 4, MW = Math.ceil((2 * HALF) / MCELL);
-const lineC = (i) => ORIGIN + i * GRID;
-const blockIdx = (v) => Math.floor((v - ORIGIN) / GRID);
-const MT = { x: -790, z: -430, R: 250, H: 125 };
+const LAT0 = -27.4689, LON0 = 153.0235;
+const KX = 111320 * Math.cos((LAT0 * Math.PI) / 180), KZ = 110574;
+function ll(lat, lon) { return [(lon - LON0) * KX, -(lat - LAT0) * KZ]; }
+let HALF = 3300; // reset from the data bounds in World.load
+const MCELL = 2; // water-mask resolution (m)
 
-// The Brown Snake, roughly: Toowong -> South Bank -> around the CBD -> Kangaroo Point ->
-// New Farm -> out past Hamilton.
-const RIVER_PTS = [
-  [-1150, 70], [-950, 40], [-760, 70], [-600, 130], [-450, 175], [-320, 215], [-170, 240],
-  [-40, 228], [60, 195], [118, 125], [142, 30], [152, -80], [182, -168], [250, -222],
-  [330, -190], [356, -80], [372, 40], [425, 118], [505, 122], [558, 40], [566, -90],
-  [548, -220], [592, -350], [700, -412], [820, -362], [900, -250], [1010, -205], [1150, -190],
-];
+const CAR_MAX_CLASS = 12; // classes 0..12 carry traffic (no service lanes / busways)
+const ROAD_W = { footway: 2.4, path: 2.0, cycleway: 2.6, steps: 2.2, pedestrian: 6 };
 
 const SUBURBS = [
-  ['Brisbane CBD', -50, -30, 'cbd'], ['Spring Hill', -110, -330, 'mid'],
-  ['Fortitude Valley', 210, -390, 'valley'], ['Kangaroo Point', 255, -50, 'mid'],
-  ['South Bank', -40, 330, 'mid'], ['West End', -280, 380, 'suburb'],
-  ['Woolloongabba', 250, 270, 'mid'], ['East Brisbane', 480, 280, 'suburb'],
-  ['New Farm', 470, -80, 'suburb'], ['Teneriffe', 660, -520, 'mid'],
-  ['Newstead', 420, -560, 'industrial'], ['Bowen Hills', 140, -620, 'industrial'],
-  ['Herston', -120, -610, 'mid'], ['Red Hill', -380, -560, 'suburb'],
-  ['Paddington', -420, -300, 'suburb'], ['Milton', -430, 30, 'mid'],
-  ['Petrie Terrace', -280, -140, 'mid'], ['Toowong', -760, -80, 'suburb'],
-  ['Auchenflower', -600, -10, 'suburb'], ['St Lucia', -700, 360, 'suburb'],
-  ['Highgate Hill', -250, 620, 'suburb'], ['Dutton Park', -40, 640, 'suburb'],
-  ['Annerley', 60, 880, 'suburb'], ['Greenslopes', 350, 760, 'suburb'],
-  ['Coorparoo', 650, 600, 'suburb'], ['Bulimba', 820, -60, 'suburb'],
-  ['Hawthorne', 820, 220, 'suburb'], ['Hamilton', 900, -620, 'suburb'],
-  ['Ashgrove', -720, -760, 'suburb'], ['Kelvin Grove', -300, -820, 'mid'],
-  ['Windsor', 100, -880, 'suburb'], ['Mt Coot-tha', MT.x, MT.z, 'mountain'],
-  ['Indooroopilly', -950, 300, 'suburb'], ['Fairfield', -300, 900, 'suburb'],
-  ['Norman Park', 650, 320, 'suburb'], ['Albion', 420, -900, 'suburb'],
-];
+  ['Brisbane CBD', -27.4698, 153.0251, 'cbd'], ['Spring Hill', -27.4613, 153.0237, 'mid'],
+  ['Fortitude Valley', -27.4568, 153.0347, 'valley'], ['New Farm', -27.4672, 153.0479, 'suburb'],
+  ['Teneriffe', -27.4560, 153.0470, 'mid'], ['Newstead', -27.4466, 153.0446, 'mid'],
+  ['Bowen Hills', -27.4440, 153.0380, 'mid'], ['Herston', -27.4460, 153.0230, 'mid'],
+  ['Kelvin Grove', -27.4500, 153.0130, 'mid'], ['Red Hill', -27.4540, 153.0020, 'suburb'],
+  ['Paddington', -27.4600, 153.0000, 'suburb'], ['Petrie Terrace', -27.4620, 153.0130, 'mid'],
+  ['Milton', -27.4700, 153.0030, 'mid'], ['South Brisbane', -27.4800, 153.0170, 'mid'],
+  ['South Bank', -27.4760, 153.0230, 'southbank'], ['West End', -27.4830, 153.0090, 'suburb'],
+  ['Highgate Hill', -27.4890, 153.0160, 'suburb'], ['Kangaroo Point', -27.4770, 153.0360, 'mid'],
+  ['Woolloongabba', -27.4880, 153.0360, 'mid'], ['East Brisbane', -27.4830, 153.0480, 'suburb'],
+  ['Dutton Park', -27.4950, 153.0270, 'suburb'], ['Auchenflower', -27.4760, 152.9960, 'suburb'],
+  ['St Lucia', -27.4960, 153.0000, 'suburb'],
+].map(([n, lat, lon, t]) => { const [x, z] = ll(lat, lon); return [n, x, z, t]; });
 
-const BRIDGE_NAMES = [
-  ['Story Bridge', 240, -240], ['Captain Cook Bridge', 120, 150], ['Victoria Bridge', -60, 230],
-  ['Go Between Bridge', -240, 230], ['William Jolly Bridge', -360, 200],
-  ['Kangaroo Point Bridge', 150, -20], ['Merivale Bridge', -480, 180],
-  ['Walter Taylor Bridge', -900, 50], ['Gateway Bridge', 1000, -200],
-  ['Bulimba Ferry Bridge', 560, -60], ['Breakfast Creek Bridge', 700, -400],
-  ['Kurilpa Bridge', -150, 230], ['Goodwill Bridge', 60, 200], ['Green Bridge', -700, 100],
-  ['Indooroopilly Toll Bridge', -840, 60], ['Teneriffe Crossing', 600, -380], ['New Farm Crossing', 340, -60],
-  ['Hawthorne Crossing', 480, 120], ['Newstead Crossing', 820, -340], ['Norman Creek Bridge', 360, 0],
-];
-
-// Real street names where the grid lines up with the real thing; Aussie-flavoured fallbacks elsewhere.
-// [dir, line coordinate, from, to, name]  dir 'H' = constant z, 'V' = constant x
-const STREETS = [
-  ['H', 120, -260, 160, 'Alice St'], ['H', 60, -260, 160, 'Margaret St'], ['H', 0, -260, 160, 'Elizabeth St'],
-  ['H', -60, -260, 160, 'Queen St'], ['H', -120, -260, 160, 'Adelaide St'], ['H', -180, -260, 160, 'Ann St'],
-  ['H', -240, -260, 160, 'Turbot St'], ['H', -300, -400, 140, 'Wickham Tce'],
-  ['V', -240, -300, 200, 'North Quay'], ['V', -180, -300, 200, 'William St'], ['V', -120, -300, 200, 'George St'],
-  ['V', -60, -300, 200, 'Albert St'], ['V', 0, -300, 200, 'Edward St'], ['V', 60, -300, 200, 'Creek St'],
-  ['V', 120, -300, 200, 'Eagle St'], ['V', 240, -340, -160, 'Bradfield Hwy'],
-  ['H', -300, 140, 400, 'Ann St'], ['H', -360, 140, 400, 'Wickham St'], ['V', 180, -560, -300, 'Brunswick St'],
-  ['V', 240, -560, -320, 'Ballow St'], ['H', -420, 140, 420, 'Gipps St'], ['V', 300, -160, 260, 'Main St'],
-  ['H', 240, -40, 520, 'Stanley St'], ['H', 360, -400, 460, 'Vulture St'], ['V', -300, 220, 640, 'Montague Rd'],
-  ['V', -240, 260, 640, 'Boundary St'], ['H', 300, -260, 0, 'Grey St'], ['V', -60, 400, 1020, 'Annerley Rd'],
-  ['V', 180, 420, 1020, 'Ipswich Rd'], ['V', 480, 300, 1020, 'Logan Rd'], ['H', 420, 440, 1020, 'Old Cleveland Rd'],
-  ['H', 0, -960, -280, 'Milton Rd'], ['H', 60, -1020, -500, 'Coronation Dr'], ['H', -300, -680, -400, 'Given Tce'],
-  ['H', -240, -680, -260, 'Caxton St'], ['V', -180, -1020, -320, 'Kelvin Grove Rd'], ['V', 60, -1020, -600, 'Lutwyche Rd'],
-  ['H', -480, 560, 1020, 'Kingsford Smith Dr'], ['H', -60, 420, 560, 'Merthyr Rd'], ['V', 840, -240, 160, 'Oxford St'],
-  ['V', -420, -600, -120, 'Latrobe Tce'], ['H', -600, -600, -200, 'Waterworks Rd'], ['V', 420, -1020, -480, 'Breakfast Creek Rd'],
-  ['H', -120, -700, -300, 'Petrie Tce'], ['V', 120, -900, -480, 'Bowen Bridge Rd'], ['H', 420, -800, -360, 'Sir Fred Schonell Dr'],
-];
-const STREET_FILL = ['Wattle St', 'Banksia Ave', 'Jacaranda St', 'Poinciana Ave', 'Bunya St', 'Macadamia Ave', 'Mango St',
-  'Frangipani Ct', 'Kookaburra St', 'Possum Pl', 'Grevillea St', 'Moreton St', 'Bottlebrush Ave', 'Cavendish Rd',
-  'Hawthorne Rd', 'Musgrave Rd', 'Enoggera Tce', 'Hardgrave Rd', 'Sylvan Rd', 'Jephson St', 'High St', 'Lambert St',
-  'Shafston Ave', 'Wynnum Rd', 'Lytton Rd', 'Fairfield Rd', 'Dornoch Tce', 'Kent St', 'Brisbane St', 'Arthur St',
-  'Heal St', 'Harcourt St', 'Bowen Tce', 'Oxlade Dr', 'Sydney St', 'Mowbray Tce', 'Lytton Rd', 'Riding Rd',
-  'Ferry Rd', 'Hale St', 'Russell St', 'Melbourne St', 'Merivale St', 'Glenelg St', 'Gladstone Rd', 'Dutton St'];
+// ---- Polygon helpers (also used by the builders) ----
+function pip(x, z, pts) {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], zi = pts[i][1], xj = pts[j][0], zj = pts[j][1];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi + 1e-12) + xi) c = !c;
+  }
+  return c;
+}
+function unflat(a, s = 10) { const o = []; for (let i = 0; i < a.length; i += 2) o.push([a[i] / s, a[i + 1] / s]); return o; }
 
 const World = {
-  mask: new Uint8Array(MW * MW),
-  H: new Uint8Array(NL * NL), // H[i*NL+j]: (i,j)-(i+1,j)
-  V: new Uint8Array(NL * NL), // V[i*NL+j]: (i,j)-(i,j+1)
-  blocks: [],
-  bridges: [],
-  river: [], // resampled points {x,z,s}
-  riverLen: 0,
   hash: new SpatialHash(32),
-  landmarks: {},
-  pois: {},
+  landmarks: {}, pois: {}, labels: [], bridges: [],
+  bounds: { x0: -2800, z0: -3200, x1: 2600, z1: 3100 },
 
+  load(d) {
+    this.data = d;
+    const [x0, z0, x1, z1] = d.bounds;
+    this.bounds = { x0, z0, x1, z1 };
+    HALF = Math.ceil(Math.max(-x0, x1, -z0, z1)) + 50;
+    this.names = d.names;
+    this.classes = d.classes;
+    this._roads(d);
+    this._water(d);
+    this.river = d.riverline.map((l) => unflat(l));
+  },
+
+  // ---------- Roads ----------
+  _roads(d) {
+    const n = d.nodes.length / 2;
+    this.nodeX = new Float32Array(n); this.nodeZ = new Float32Array(n);
+    for (let i = 0; i < n; i++) { this.nodeX[i] = d.nodes[2 * i] / 10; this.nodeZ[i] = d.nodes[2 * i + 1] / 10; }
+    this.adj = Array.from({ length: n }, () => []);
+    this.edges = [];
+    this.edgeHash = new SpatialHash(40);
+    this.nodeHash = new SpatialHash(60);
+    this.bridgeHash = new SpatialHash(40);
+    for (const r of d.edges) {
+      const [a, b, cls, nm, oneway, lanes, bridge, mid, bnm] = r;
+      const cname = d.classes[cls];
+      const pts = [[this.nodeX[a], this.nodeZ[a]], ...unflat(mid), [this.nodeX[b], this.nodeZ[b]]];
+      const cum = [0];
+      for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+      const walk = cls > 14;
+      const w = walk ? ROAD_W[cname] || 2.2 : Math.max(4, lanes * 3.3 + (oneway ? 0.4 : 0.8));
+      const e = {
+        i: this.edges.length, a, b, cls, cname, name: nm >= 0 ? d.names[nm] : null, oneway: !!oneway, lanes, bridge: !!bridge,
+        bname: bnm !== undefined && bnm >= 0 ? d.names[bnm] : null, pts, cum, len: cum[cum.length - 1], w, walk, car: !walk && cls <= CAR_MAX_CLASS,
+      };
+      this.edges.push(e);
+      this.adj[a].push({ e: e.i, to: b, dir: 1 });
+      this.adj[b].push({ e: e.i, to: a, dir: -1 });
+      for (let k = 1; k < pts.length; k++) {
+        const p = pts[k - 1], q = pts[k];
+        const seg = { e: e.i, k, minX: Math.min(p[0], q[0]) - w / 2, maxX: Math.max(p[0], q[0]) + w / 2, minZ: Math.min(p[1], q[1]) - w / 2, maxZ: Math.max(p[1], q[1]) + w / 2 };
+        this.edgeHash.insert(seg);
+        if (e.bridge && !walk) this.bridgeHash.insert(seg);
+      }
+    }
+    for (let i = 0; i < n; i++) if (this.adj[i].length) this.nodeHash.insert({ i, minX: this.nodeX[i], maxX: this.nodeX[i], minZ: this.nodeZ[i], maxZ: this.nodeZ[i] });
+  },
+  // Can a car leave its node along adjacency item `it`?
+  canDrive(it) { const e = this.edges[it.e]; return e.car && (!e.oneway || it.dir === 1); },
+  carNeighbors(node) { return this.adj[node].filter((it) => this.canDrive(it)); },
+  walkable(E) { return E.walk || (E.cls >= 2 && E.cls <= 13 && E.cls !== 8 && E.cls !== 9); },
+  walkNeighbors(node) { return this.adj[node].filter((it) => this.walkable(this.edges[it.e])); },
+  // Position and unit tangent at distance s along edge e, travelling in direction dir.
+  pointAt(e, dir, s) {
+    const E = this.edges[e];
+    if (dir < 0) s = E.len - s;
+    s = clamp(s, 0, E.len);
+    const c = E.cum;
+    let k = 1;
+    while (k < c.length - 1 && c[k] < s) k++;
+    const p = E.pts[k - 1], q = E.pts[k], L = c[k] - c[k - 1] || 1, u = (s - c[k - 1]) / L;
+    let tx = (q[0] - p[0]) / L, tz = (q[1] - p[1]) / L;
+    if (dir < 0) { tx = -tx; tz = -tz; }
+    return [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u, tx, tz];
+  },
+  _segDist(x, z, p, q) {
+    const dx = q[0] - p[0], dz = q[1] - p[1], L2 = dx * dx + dz * dz || 1;
+    const u = clamp(((x - p[0]) * dx + (z - p[1]) * dz) / L2, 0, 1);
+    return [Math.hypot(x - (p[0] + dx * u), z - (p[1] + dz * u)), u];
+  },
+  // Nearest edge (optionally filtered) within r metres: {e, s, d}
+  nearestEdge(x, z, r = 60, filter) {
+    const segs = this.edgeHash.query(x - r, z - r, x + r, z + r, World._tmpE);
+    let best = null;
+    for (const sg of segs) {
+      const E = this.edges[sg.e];
+      if (filter && !filter(E)) continue;
+      const [d, u] = this._segDist(x, z, E.pts[sg.k - 1], E.pts[sg.k]);
+      if (d < r && (!best || d < best.d)) best = { e: sg.e, s: E.cum[sg.k - 1] + u * (E.cum[sg.k] - E.cum[sg.k - 1]), d };
+    }
+    return best;
+  },
+  nearestNode(x, z, car = true) {
+    for (let r = 60; r <= 960; r *= 2) {
+      const ns = this.nodeHash.query(x - r, z - r, x + r, z + r, World._tmpN);
+      let best = -1, bd = 1e18;
+      for (const o of ns) {
+        if (car && !this.adj[o.i].some((it) => this.edges[it.e].car)) continue;
+        const d = (this.nodeX[o.i] - x) ** 2 + (this.nodeZ[o.i] - z) ** 2;
+        if (d < bd) { bd = d; best = o.i; }
+      }
+      if (best >= 0) return best;
+    }
+    return null;
+  },
+  nodePos(n) { return [this.nodeX[n], this.nodeZ[n]]; },
+  // A* over the road network (police ignore one-way rules). Returns node list excluding the start.
+  path(a, b, maxIter = 5000) {
+    if (a === null || b === null) return null;
+    if (a === b) return [];
+    const open = new Map(), g = new Map([[a, 0]]), prev = new Map(), closed = new Set();
+    const h = (n) => Math.hypot(this.nodeX[n] - this.nodeX[b], this.nodeZ[n] - this.nodeZ[b]);
+    open.set(a, h(a));
+    for (let it = 0; it < maxIter && open.size; it++) {
+      let cur = -1, cf = Infinity;
+      for (const [n, f] of open) if (f < cf) { cf = f; cur = n; }
+      open.delete(cur);
+      if (cur === b) {
+        const out = [];
+        for (let c = b; c !== a; c = prev.get(c)) out.push(c);
+        return out.reverse();
+      }
+      closed.add(cur);
+      for (const ad of this.adj[cur]) {
+        const E = this.edges[ad.e];
+        if (!E.car && E.cls !== 13) continue;
+        if (closed.has(ad.to)) continue;
+        const ng = g.get(cur) + E.len * (E.cls <= 4 ? 0.8 : 1);
+        if (ng < (g.get(ad.to) ?? Infinity)) { g.set(ad.to, ng); prev.set(ad.to, cur); open.set(ad.to, ng + h(ad.to)); }
+      }
+    }
+    return null;
+  },
+
+  // ---------- Water ----------
+  _water(d) {
+    const { x0, z0, x1, z1 } = this.bounds;
+    const W = Math.ceil((x1 - x0) / MCELL), H = Math.ceil((z1 - z0) / MCELL);
+    this.MW = W; this.MH = H;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    const draw = (p, col) => {
+      g.fillStyle = col; g.beginPath();
+      for (let i = 0; i < p.length; i += 2) { const X = (p[i] / 10 - x0) / MCELL, Z = (p[i + 1] / 10 - z0) / MCELL; i ? g.lineTo(X, Z) : g.moveTo(X, Z); }
+      g.closePath(); g.fill();
+    };
+    for (const w of d.water) if (w.t === 'river') draw(w.p, '#fff');
+    for (const w of d.water) if (w.t === 'island') draw(w.p, '#000');
+    for (const w of d.water) if (w.t === 'pond' || w.t === 'pool') draw(w.p, '#fff');
+    const px = g.getImageData(0, 0, W, H).data;
+    this.mask = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) this.mask[i] = px[i * 4] > 127 ? 1 : 0;
+  },
   isWater(x, z) {
-    const ix = Math.floor((x + HALF) / MCELL), iz = Math.floor((z + HALF) / MCELL);
-    if (ix < 0 || iz < 0 || ix >= MW || iz >= MW) return false;
-    return this.mask[ix * MW + iz] === 1;
+    const ix = Math.floor((x - this.bounds.x0) / MCELL), iz = Math.floor((z - this.bounds.z0) / MCELL);
+    if (ix < 0 || iz < 0 || ix >= this.MW || iz >= this.MH) return false;
+    return this.mask[iz * this.MW + ix] === 1;
   },
   onBridge(x, z) {
-    for (const b of this.bridges) if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return b;
+    const segs = this.bridgeHash.query(x, z, x, z, World._tmpB);
+    for (const sg of segs) {
+      const E = this.edges[sg.e];
+      if (this._segDist(x, z, E.pts[sg.k - 1], E.pts[sg.k])[0] < E.w / 2 + 2.5) return { name: E.bname || E.name || 'Bridge', e: E };
+    }
     return null;
   },
   inRiver(x, z) { return this.isWater(x, z) && !this.onBridge(x, z); },
-  groundY(x, z) {
-    const dx = x - MT.x, dz = z - MT.z, d = Math.sqrt(dx * dx + dz * dz);
-    if (d >= MT.R) return 0;
-    const t = 1 - d / MT.R;
-    const s = 0.5 - 0.5 * Math.cos(Math.PI * t);
-    return MT.H * s + 5 * Math.sin(x * 0.045) * Math.cos(z * 0.05) * s;
-  },
-  edge(i1, j1, i2, j2) {
-    if (j1 === j2 && Math.abs(i1 - i2) === 1) { const i = Math.min(i1, i2); return i >= 0 && i < NL - 1 ? this.H[i * NL + j1] : 0; }
-    if (i1 === i2 && Math.abs(j1 - j2) === 1) { const j = Math.min(j1, j2); return j >= 0 && j < NL - 1 ? this.V[i1 * NL + j] : 0; }
-    return 0;
-  },
-  setEdge(i1, j1, i2, j2, v) {
-    if (j1 === j2) this.H[Math.min(i1, i2) * NL + j1] = v;
-    else this.V[i1 * NL + Math.min(j1, j2)] = v;
-  },
-  // Neighbouring nodes reachable by car (1 road, 2 bridge) or, with peds=true, also mall (3).
-  neighbors(i, j, peds) {
-    const out = [];
-    const ok = (t) => t === 1 || t === 2 || (peds && t === 3);
-    if (ok(this.edge(i, j, i + 1, j))) out.push([i + 1, j]);
-    if (ok(this.edge(i, j, i - 1, j))) out.push([i - 1, j]);
-    if (ok(this.edge(i, j, i, j + 1))) out.push([i, j + 1]);
-    if (ok(this.edge(i, j, i, j - 1))) out.push([i, j - 1]);
-    return out;
-  },
-  nearestNode(x, z) {
-    const bi = Math.round((x - ORIGIN) / GRID), bj = Math.round((z - ORIGIN) / GRID);
-    let best = null, bd = 1e9;
-    for (let r = 0; r < 4 && !best; r++)
-      for (let i = bi - r; i <= bi + r; i++)
-        for (let j = bj - r; j <= bj + r; j++) {
-          if (i < 0 || j < 0 || i >= NL || j >= NL) continue;
-          if (!this.neighbors(i, j).length) continue;
-          const d = (lineC(i) - x) ** 2 + (lineC(j) - z) ** 2;
-          if (d < bd) { bd = d; best = [i, j]; }
-        }
-    return best;
-  },
-  // Shortest road path (BFS) between nodes; returns list of [i,j] excluding start.
-  path(a, b) {
-    if (!a || !b) return null;
-    const N = NL * NL, prev = new Int32Array(N).fill(-1);
-    const s = a[0] * NL + a[1], t = b[0] * NL + b[1];
-    const q = [s]; prev[s] = s;
-    while (q.length) {
-      const c = q.shift();
-      if (c === t) break;
-      const ci = (c / NL) | 0, cj = c % NL;
-      for (const [ni, nj] of this.neighbors(ci, cj)) {
-        const n = ni * NL + nj;
-        if (prev[n] === -1) { prev[n] = c; q.push(n); }
-      }
-    }
-    if (prev[t] === -1) return null;
-    const out = [];
-    for (let c = t; c !== s; c = prev[c]) out.push([(c / NL) | 0, c % NL]);
-    return out.reverse();
-  },
+  groundY() { return 0; },
+  clampX(x) { return clamp(x, this.bounds.x0 + 5, this.bounds.x1 - 5); },
+  clampZ(z) { return clamp(z, this.bounds.z0 + 5, this.bounds.z1 - 5); },
+
+  // ---------- Names ----------
   streetAt(x, z) {
-    const vi = Math.round((x - ORIGIN) / GRID), hj = Math.round((z - ORIGIN) / GRID);
-    const dv = Math.abs(x - lineC(vi)), dh = Math.abs(z - lineC(hj));
-    const onV = dv < 10 && (this.edge(vi, Math.floor((z - ORIGIN) / GRID), vi, Math.floor((z - ORIGIN) / GRID) + 1) > 0);
-    const onH = dh < 10 && (this.edge(Math.floor((x - ORIGIN) / GRID), hj, Math.floor((x - ORIGIN) / GRID) + 1, hj) > 0);
-    let dir = null;
-    if (onV && onH) dir = dv < dh ? 'V' : 'H'; else if (onV) dir = 'V'; else if (onH) dir = 'H';
-    if (!dir) return null;
-    const line = dir === 'V' ? lineC(vi) : lineC(hj), along = dir === 'V' ? z : x;
-    for (const s of STREETS) if (s[0] === dir && s[1] === line && along >= s[2] && along <= s[3]) return s[4];
-    const seg = Math.floor((along + HALF) / 300);
-    return STREET_FILL[((dir === 'V' ? vi * 7 : hj * 13 + 5) + seg * 3) % STREET_FILL.length];
+    const n = this.nearestEdge(x, z, 14, (E) => !!E.name && !E.walk);
+    if (!n) return null;
+    return n.d < this.edges[n.e].w / 2 + 4 ? this.edges[n.e].name : null;
   },
   suburbAt(x, z) {
     let best = SUBURBS[0], bd = 1e18;
-    for (const s of SUBURBS) {
-      const d = (s[1] - x) ** 2 + (s[2] - z) ** 2;
-      if (d < bd) { bd = d; best = s; }
-    }
-    if (x > -225 && x < 120 && z > -235 && z < 170) return SUBURBS[0];
+    for (const s of SUBURBS) { const d = (s[1] - x) ** 2 + (s[2] - z) ** 2; if (d < bd) { bd = d; best = s; } }
     return best;
   },
-  block(i, j) { return i >= 0 && j >= 0 && i < NB && j < NB ? this.blocks[i * NB + j] : null; },
-  blockAt(x, z) { return this.block(blockIdx(x), blockIdx(z)); },
-
-  generate() {
-    this._river();
-    this._roads();
-    this._blocks();
-  },
-
-  _river() {
-    const P = RIVER_PTS, pts = [];
-    for (let k = 0; k < P.length - 1; k++) {
-      const p0 = P[Math.max(0, k - 1)], p1 = P[k], p2 = P[k + 1], p3 = P[Math.min(P.length - 1, k + 2)];
-      for (let s = 0; s < 20; s++) {
-        const t = s / 20, t2 = t * t, t3 = t2 * t;
-        const f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-        pts.push({ x: f(p0[0], p1[0], p2[0], p3[0]), z: f(p0[1], p1[1], p2[1], p3[1]) });
-      }
-    }
-    pts.push({ x: P[P.length - 1][0], z: P[P.length - 1][1] });
-    // Resample evenly every 4 units.
-    const out = [{ x: pts[0].x, z: pts[0].z, s: 0 }];
-    let acc = 0, total = 0;
-    for (let k = 1; k < pts.length; k++) {
-      const a = pts[k - 1], b = pts[k];
-      const L = Math.hypot(b.x - a.x, b.z - a.z);
-      let d = 0;
-      while (acc + (L - d) >= 4) {
-        d += 4 - acc; acc = 0; total += 4;
-        const t = d / L;
-        out.push({ x: lerp(a.x, b.x, t), z: lerp(a.z, b.z, t), s: total });
-      }
-      acc += L - d;
-    }
-    this.river = out;
-    this.riverLen = total;
-    const r = RIVER_HW, rc = Math.ceil(r / MCELL) + 1;
-    for (const p of out) {
-      const cx = Math.floor((p.x + HALF) / MCELL), cz = Math.floor((p.z + HALF) / MCELL);
-      for (let ix = cx - rc; ix <= cx + rc; ix++)
-        for (let iz = cz - rc; iz <= cz + rc; iz++) {
-          if (ix < 0 || iz < 0 || ix >= MW || iz >= MW) continue;
-          const wx = ix * MCELL - HALF + 2, wz = iz * MCELL - HALF + 2;
-          if ((wx - p.x) ** 2 + (wz - p.z) ** 2 < r * r) this.mask[ix * MW + iz] = 1;
-        }
-    }
-  },
-
-  _segFlags(x1, z1, x2, z2) {
-    let wet = false, mtn = false;
-    for (let k = 0; k <= 12; k++) {
-      const t = k / 12, x = lerp(x1, x2, t), z = lerp(z1, z2, t);
-      if (this.isWater(x, z)) wet = true;
-      if (Math.hypot(x - MT.x, z - MT.z) < MT.R - 10) mtn = true;
-    }
-    return { wet, mtn };
-  },
-
-  _roads() {
-    const WET = 9;
-    for (let i = 0; i < NL - 1; i++)
-      for (let j = 0; j < NL; j++) {
-        const f = this._segFlags(lineC(i), lineC(j), lineC(i + 1), lineC(j));
-        this.H[i * NL + j] = f.mtn ? 0 : f.wet ? WET : 1;
-      }
-    for (let i = 0; i < NL; i++)
-      for (let j = 0; j < NL - 1; j++) {
-        const f = this._segFlags(lineC(i), lineC(j), lineC(i), lineC(j + 1));
-        this.V[i * NL + j] = f.mtn ? 0 : f.wet ? WET : 1;
-      }
-    // Bridge every other line where the river crossing is short; drop the rest.
-    const bridgeLine = (dir, line, a, b) => {
-      // a..b inclusive edge indices along the line
-      const x0 = dir === 'H' ? lineC(a) : lineC(line), z0 = dir === 'H' ? lineC(line) : lineC(a);
-      const x1 = dir === 'H' ? lineC(b + 1) : lineC(line), z1 = dir === 'H' ? lineC(line) : lineC(b + 1);
-      const len = b - a + 1;
-      const ok = line % 2 === 1 && len <= 3 && a > 0 && b < NL - 2 && !this.isWater(x0, z0) && !this.isWater(x1, z1);
-      for (let k = a; k <= b; k++) {
-        if (dir === 'H') this.H[k * NL + line] = ok ? 2 : 0;
-        else this.V[line * NL + k] = ok ? 2 : 0;
-      }
-      if (ok) {
-        const w = SIDEW / 2;
-        this.bridges.push({
-          name: 'Brisbane River crossing', dir,
-          minX: Math.min(x0, x1) - w, maxX: Math.max(x0, x1) + w,
-          minZ: Math.min(z0, z1) - w, maxZ: Math.max(z0, z1) + w,
-          x0, z0, x1, z1,
-        });
-      }
-    };
-    for (let j = 0; j < NL; j++) {
-      let s = -1;
-      for (let i = 0; i <= NL - 1; i++) {
-        const wet = i < NL - 1 && this.H[i * NL + j] === WET;
-        if (wet && s < 0) s = i;
-        if (!wet && s >= 0) { bridgeLine('H', j, s, i - 1); s = -1; }
-      }
-    }
-    for (let i = 0; i < NL; i++) {
-      let s = -1;
-      for (let j = 0; j <= NL - 1; j++) {
-        const wet = j < NL - 1 && this.V[i * NL + j] === WET;
-        if (wet && s < 0) s = j;
-        if (!wet && s >= 0) { bridgeLine('V', i, s, j - 1); s = -1; }
-      }
-    }
-    // Give the real names to the nearest crossings, closest pairs first.
-    const pairs = [];
-    for (const b of this.bridges) for (const n of BRIDGE_NAMES) {
-      const d = Math.hypot(n[1] - (b.x0 + b.x1) / 2, n[2] - (b.z0 + b.z1) / 2);
-      if (d < 170) pairs.push([d, b, n[0]]);
-    }
-    pairs.sort((a, b) => a[0] - b[0]);
-    const usedN = new Set(), usedB = new Set();
-    for (const [, b, n] of pairs) if (!usedN.has(n) && !usedB.has(b)) { b.name = n; usedN.add(n); usedB.add(b); }
-    // Queen Street Mall: pedestrian only.
-    const mj = blockIdx(-60) + 0;
-    for (let i = blockIdx(-120); i < blockIdx(60); i++) if (this.H[i * NL + mj] === 1) this.H[i * NL + mj] = 3;
-    this.mall = { minX: -120, maxX: 60, z: lineC(mj) };
-  },
-
-  _blocks() {
-    const rng = mulberry32(4000);
-    this.rng = rng;
-    for (let i = 0; i < NB; i++)
-      for (let j = 0; j < NB; j++) {
-        const cx = lineC(i) + GRID / 2, cz = lineC(j) + GRID / 2;
-        const sub = this.suburbAt(cx, cz);
-        let wet = 0;
-        for (let a = 0; a < 5; a++)
-          for (let b = 0; b < 5; b++)
-            if (this.isWater(lineC(i) + 8 + a * 11, lineC(j) + 8 + b * 11)) wet++;
-        let zone = sub[3];
-        if (Math.hypot(cx - MT.x, cz - MT.z) < MT.R + 10) zone = 'mountain';
-        else if (zone === 'suburb' && rng() < 0.07) zone = 'park';
-        this.blocks.push({ i, j, cx, cz, sub: sub[0], zone, wet, used: false });
-      }
-    const setZone = (x, z, zone) => { const b = this.blockAt(x, z); if (b) b.zone = zone; };
-    // Hand-placed parks.
-    [[90, 100], [90, 40], [-170, -150], [-110, -150], [-60, -430], [-120, -430], [500, 30], [-260, 290],
-     [440, -20], [-160, 330], [-640, 260]].forEach(([x, z]) => setZone(x, z, 'park'));
-    // South Bank parklands strip along the river.
-    for (let x = -150; x <= 60; x += 60) for (let z = 250; z <= 310; z += 60) {
-      const b = this.blockAt(x, z); if (b && b.zone !== 'park') b.zone = 'southbank';
-    }
-  },
-
-  // Remove the roads inside a w x h group of blocks so a landmark can sit there.
-  reserve(i0, j0, w, h) {
-    for (let i = i0; i < i0 + w; i++) for (let j = j0; j < j0 + h; j++) { const b = this.block(i, j); if (b) b.used = true; }
-    for (let i = i0; i < i0 + w; i++) for (let j = j0 + 1; j < j0 + h; j++) this.H[i * NL + j] = 0;
-    for (let i = i0 + 1; i < i0 + w; i++) for (let j = j0; j < j0 + h; j++) this.V[i * NL + j] = 0;
-    return { minX: lineC(i0) + 10, maxX: lineC(i0 + w) - 10, minZ: lineC(j0) + 10, maxZ: lineC(j0 + h) - 10,
-      cx: (lineC(i0) + lineC(i0 + w)) / 2, cz: (lineC(j0) + lineC(j0 + h)) / 2 };
-  },
+  zoneAt(x, z) { return this.suburbAt(x, z)[3]; },
 };
-
-if (typeof module !== 'undefined') module.exports = { World, SUBURBS, lineC, NL, NB, GRID };
+World._tmpE = []; World._tmpN = []; World._tmpB = [];

@@ -1,14 +1,14 @@
 'use strict';
 // Story missions. Each step is a small state machine entry.
 
-function snapNode(x, z) { const n = World.nearestNode(x, z); return n ? { x: lineC(n[0]), z: lineC(n[1]) } : { x, z }; }
+function snapNode(x, z) { const n = World.nearestNode(x, z); return n !== null ? { x: World.nodeX[n], z: World.nodeZ[n] } : { x, z }; }
 
 const Missions = {
   idx: 0, active: null, step: 0, d: {}, target: null, enemies: [],
   init() {
     const P = World.pois;
-    const mall = { x: -140, z: -60 };
-    const valley = snapNode(240, -420);
+    const mall = P.mall;
+    const valley = P.valley;
     this.defs = [
       {
         name: "G'day Brisvegas", giver: P.southbank, who: 'Davo', reward: 500,
@@ -35,7 +35,7 @@ const Missions = {
         ],
       },
       {
-        name: 'Bin Chicken Bandit', giver: snapNode(60, 60), who: 'Uncle Kev', reward: 800,
+        name: 'Bin Chicken Bandit', giver: P.gardens, who: 'Uncle Kev', reward: 800,
         steps: [
           { t: 'text', s: 'UNCLE KEV: Strewth! A bloody bin chicken just pinched me sausage sanga!', d: 4 },
           { t: 'text', s: 'UNCLE KEV: Run it down and get me sanga back. On foot, mind - it\'s a protected species!', d: 4 },
@@ -44,7 +44,7 @@ const Missions = {
         ],
       },
       {
-        name: 'Valley Bikies', giver: snapNode(-60, -300), who: 'Tracy', reward: 3000,
+        name: 'Valley Bikies', giver: P.springhill, who: 'Tracy', reward: 3000,
         steps: [
           { t: 'text', s: 'TRACY: The Cane Toads MC have been shaking down my bar in the Valley.', d: 4 },
           { t: 'text', s: "TRACY: Here, take this. Go sort 'em out.", d: 3, give: 'pistol' },
@@ -59,17 +59,17 @@ const Missions = {
           { t: 'text', s: "JAYDEN: Reckon your ride's quick? Story Bridge loop. 100 seconds. Easy.", d: 4 },
           { t: 'car', s: 'Get a vehicle.' },
           { t: 'race', s: 'Hit every ~checkpoint~!', time: 100,
-            cps: [[240, -120], [240, -300], [120, -360], [0, -240], [60, -60], [60, 120], [180, 120], [180, 240], [300, 60]] },
+            cps: [[-27.4720, 153.0352], [-27.4627, 153.0352], [-27.4618, 153.0300], [-27.4660, 153.0272], [-27.4700, 153.0296], [-27.4752, 153.0283], [-27.4800, 153.0235], [-27.4815, 153.0320], [-27.4778, 153.0360]] },
           { t: 'text', s: 'JAYDEN: Fair dinkum, that was quick. Here, take my cash.', d: 3 },
         ],
       },
       {
-        name: 'Sunset at Coot-tha', giver: snapNode(-420, -60), who: 'Davo', reward: 5000, sunset: true,
+        name: 'Sunset at the Cliffs', giver: P.milton, who: 'Davo', reward: 5000, sunset: true,
         steps: [
-          { t: 'text', s: "DAVO: You've done alright, cuz. Let's catch the sunset from Mt Coot-tha.", d: 4 },
+          { t: 'text', s: "DAVO: You've done alright, cuz. Let's catch the sunset over the river from the Kangaroo Point Cliffs.", d: 4 },
           { t: 'car', s: 'Get a vehicle.' },
-          { t: 'goto', s: 'Drive up to the ~Mt Coot-tha lookout~.', at: P.lookout, r: 12, car: true, time: 150 },
-          { t: 'text', s: "DAVO: Look at that view. Best city in the world, mate. Brisbane's yours.", d: 6 },
+          { t: 'goto', s: 'Drive to the ~Kangaroo Point Cliffs~ lookout.', at: P.lookout, r: 14, car: true, time: 210 },
+          { t: 'text', s: "DAVO: Look at that skyline. Best city in the world, mate. Brisbane's yours.", d: 6 },
         ],
       },
     ];
@@ -125,7 +125,7 @@ const Missions = {
     }
     if (s.t === 'wanted' && G.wanted === 0) Police.setWanted(2);
   },
-  cpPos(s, k) { const c = snapNode(s.cps[k][0], s.cps[k][1]); return { x: c.x, z: c.z, r: 9 }; },
+  cpPos(s, k) { const [x, z] = ll(s.cps[k][0], s.cps[k][1]); const c = roadSpot(x, z); return { x: c.x, z: c.z, r: 10 }; },
   cleanupStep() { this.cp.visible = false; this.arrow.visible = false; HUD.timer(null); },
   cleanupAll() {
     this.cleanupStep();

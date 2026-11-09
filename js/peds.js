@@ -28,29 +28,29 @@ class Ped {
     this.mission = o.mission || null;
     G.peds.push(this);
     if (o.state) this.state = o.state;
-    if (this.state === 'walk') this.initNav();
+    if (o.nav) { const E = World.edges[o.nav.e]; this.nav = { e: o.nav.e, dir: o.nav.dir, side: o.nav.dir > 0 ? o.nav.side : -o.nav.side, s: projectOnEdge(o.nav.e, o.nav.dir, x, z) }; this.walkOff = E.walk ? 0 : (E.w / 2 + 1.6); }
+    else if (this.state === 'walk') this.initNav();
   }
+  // Walk the footpath beside a road (or along a mapped path), choosing a new street at each corner.
   initNav() {
-    const n = World.nearestNode(this.x, this.z);
-    if (!n) { this.state = 'idle'; return; }
-    this.nav = { i: n[0], j: n[1], sx: Math.sign(this.x - lineC(n[0])) || 1, sz: Math.sign(this.z - lineC(n[1])) || 1 };
-    this.prevNav = null;
+    const n = World.nearestEdge(this.x, this.z, 40, (E) => World.walkable(E));
+    if (!n) { this.nav = null; this.state = 'idle'; return; }
+    const E = World.edges[n.e], [px, pz, tx, tz] = World.pointAt(n.e, 1, n.s);
+    const side = Math.sign((this.x - px) * tz - (this.z - pz) * tx) || 1, dir = Math.random() < 0.5 ? 1 : -1;
+    this.nav = { e: n.e, dir, side: dir > 0 ? side : -side, s: dir > 0 ? n.s : E.len - n.s };
+    this.walkOff = E.walk ? 0 : E.w / 2 + 1.6;
   }
-  corner(n) { return [lineC(n.i) + n.sx * 9.5, lineC(n.j) + n.sz * 9.5]; }
+  navPoint(e, dir, s, side) {
+    const E = World.edges[e], [x, z, tx, tz] = World.pointAt(e, dir, s), o = (E.walk ? 0 : E.w / 2 + 1.6) * side;
+    return [x + tz * o, z - tx * o];
+  }
   nextNav() {
-    const { i, j, sx, sz } = this.nav, opts = [];
-    if (World.edge(i, j, i + sx, j) > 0) opts.push({ i: i + sx, j, sx: -sx, sz, w: 4 });
-    if (World.edge(i, j, i, j + sz) > 0) opts.push({ i, j: j + sz, sx, sz: -sz, w: 4 });
-    opts.push({ i, j, sx: -sx, sz, w: 1 }, { i, j, sx, sz: -sz, w: 1 });
-    const good = opts.filter((o) => {
-      const [x, z] = this.corner(o);
-      if (World.inRiver(x, z)) return false;
-      const p = this.prevNav;
-      return !(p && p.i === o.i && p.j === o.j && p.sx === o.sx && p.sz === o.sz);
-    });
-    const list = good.length ? good : opts;
-    let tot = list.reduce((a, o) => a + o.w, 0), r = Math.random() * tot;
-    for (const o of list) { r -= o.w; if (r <= 0) { this.prevNav = this.nav; this.nav = o; return; } }
+    const nv = this.nav, E = World.edges[nv.e];
+    const node = nv.dir > 0 ? E.b : E.a;
+    let opts = World.walkNeighbors(node).filter((it) => it.e !== nv.e);
+    if (!opts.length) opts = [{ e: nv.e, dir: -nv.dir }];
+    const it = pick(opts);
+    this.nav = { e: it.e, dir: it.dir, side: nv.side, s: 0 };
   }
   remove() {
     if (this.removed) return;
@@ -127,10 +127,13 @@ class Ped {
       case 'walk': {
         if (!this.nav) this.initNav();
         if (!this.nav) break;
-        const [tx, tz] = this.corner(this.nav);
+        const nv = this.nav, E = World.edges[nv.e];
+        if (nv.s >= E.len - 0.5) { this.nextNav(); break; }
+        const [tx, tz] = this.navPoint(nv.e, nv.dir, Math.min(E.len, nv.s + 2.2), nv.side);
         const dx = tx - this.x, dz = tz - this.z, d = Math.hypot(dx, dz);
-        if (d < 0.8) this.nextNav();
-        else { mx = dx / d; mz = dz / d; speed = this.walkSpeed; }
+        if (d > 25) { this.initNav(); break; }
+        if (d > 0.05) { mx = dx / d; mz = dz / d; speed = this.walkSpeed; }
+        if (d < 2.6) nv.s += this.walkSpeed * dt;
         if (this.kind === 'cop' && G.wanted > 0 && pd < 50 && !Player.dead) this.state = 'attack';
         break;
       }

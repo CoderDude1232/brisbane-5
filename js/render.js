@@ -30,8 +30,8 @@ const Render = {
     document.body.appendChild(r.domElement);
     G.renderer = r;
     G.scene = new THREE.Scene();
-    G.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, G.hq ? 1600 : 700);
-    G.scene.fog = G.hq ? new THREE.Fog(0xc3d6e8, 260, 1250) : new THREE.Fog(0xc3d6e8, 150, 560);
+    G.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, G.hq ? 2600 : 950);
+    G.scene.fog = G.hq ? new THREE.Fog(0xc3d6e8, 450, 2300) : new THREE.Fog(0xc3d6e8, 200, 800);
 
     G.hemi = new THREE.HemisphereLight(0xdfeaf5, 0x5a5446, G.hq ? 0.35 : 0.8);
     G.scene.add(G.hemi);
@@ -50,7 +50,7 @@ const Render = {
 
     // Physical sky that follows the camera
     this.sky = new THREE.Sky();
-    this.sky.scale.setScalar(G.hq ? 1400 : 640);
+    this.sky.scale.setScalar(G.hq ? 2400 : 900);
     const u = this.sky.material.uniforms;
     u.turbidity.value = 4.5; u.rayleigh.value = 1.4; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.85;
     G.scene.add(this.sky);
@@ -67,7 +67,7 @@ const Render = {
         p.position.set(rand(-34, 34), rand(-3, 4), rand(-16, 16));
         c.add(p);
       }
-      c.position.set(rand(-1200, 1200), rand(230, 320), rand(-1200, 1200));
+      c.position.set(rand(-3000, 3000), rand(260, 360), rand(-3000, 3000));
       G.scene.add(c); G.clouds.push(c);
     }
 

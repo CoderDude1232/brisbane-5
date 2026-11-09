@@ -102,16 +102,17 @@ const HUD = {
     g.translate(-P.x, -P.z);
     const span = (R * 1.6) / Z;
     g.imageSmoothingEnabled = false;
-    const sx = clamp(P.x - span + HALF, 0, 2 * HALF), sz = clamp(P.z - span + HALF, 0, 2 * HALF);
-    const sw = Math.min(span * 2, 2 * HALF - sx), sh = Math.min(span * 2, 2 * HALF - sz);
-    if (sw > 0 && sh > 0) g.drawImage(World.mapCanvas, sx, sz, sw, sh, sx - HALF, sz - HALF, sw, sh);
+    const B = World.bounds, ms = World.mapScale, mc = World.mapCanvas;
+    const sx = clamp((P.x - span - B.x0) * ms, 0, mc.width), sz = clamp((P.z - span - B.z0) * ms, 0, mc.height);
+    const sw = Math.min(span * 2 * ms, mc.width - sx), sh = Math.min(span * 2 * ms, mc.height - sz);
+    if (sw > 0 && sh > 0) g.drawImage(mc, sx, sz, sw, sh, B.x0 + sx / ms, B.z0 + sz / ms, sw / ms, sh / ms);
     // GPS route
     this.routeT -= dt;
     const tg = Missions.target;
     if (tg && this.routeT <= 0) {
       this.routeT = 0.5;
       const path = World.path(World.nearestNode(P.x, P.z), World.nearestNode(tg.x, tg.z));
-      this.route = path ? [[P.x, P.z]].concat(path.map((n) => [lineC(n[0]), lineC(n[1])]), [[tg.x, tg.z]]) : null;
+      this.route = path ? [[P.x, P.z]].concat(path.map((n) => [World.nodeX[n], World.nodeZ[n]]), [[tg.x, tg.z]]) : null;
     }
     if (tg && this.route) {
       g.strokeStyle = '#b452ff'; g.lineWidth = 6 / Z * dpr; g.lineJoin = 'round';
@@ -161,14 +162,14 @@ const HUD = {
     const c = $('bigmap'), g = c.getContext('2d');
     const W = (c.width = innerWidth), H = (c.height = innerHeight);
     g.fillStyle = 'rgba(10,14,12,0.94)'; g.fillRect(0, 0, W, H);
-    const S = Math.min(W, H) * 0.92, ox = (W - S) / 2, oy = (H - S) / 2, k = S / (2 * HALF);
-    g.drawImage(World.mapCanvas, ox, oy, S, S);
-    g.strokeStyle = '#ccc'; g.strokeRect(ox, oy, S, S);
-    const at = (x, z) => [ox + (x + HALF) * k, oy + (z + HALF) * k];
+    const B = World.bounds, bw = B.x1 - B.x0, bh = B.z1 - B.z0;
+    const k = Math.min(W * 0.94 / bw, H * 0.94 / bh), SW = bw * k, SH = bh * k, ox = (W - SW) / 2, oy = (H - SH) / 2, S = Math.min(SW, SH);
+    g.drawImage(World.mapCanvas, ox, oy, SW, SH);
+    g.strokeStyle = '#ccc'; g.strokeRect(ox, oy, SW, SH);
+    const at = (x, z) => [ox + (x - B.x0) * k, oy + (z - B.z0) * k];
     g.font = 'bold 12px "Barlow Condensed", sans-serif'; g.textAlign = 'center';
-    const labels = [['CBD', -50, -20], ['SOUTH BANK', -60, 320], ['FORTITUDE VALLEY', 210, -400], ['KANGAROO POINT', 255, -60], ['NEW FARM', 470, -90],
-      ['WEST END', -280, 380], ['WOOLLOONGABBA', 260, 220], ['MILTON', -440, 0], ['PADDINGTON', -420, -300], ['MT COOT-THA', MT.x, MT.z], ['TOOWONG', -720, -60],
-      ['SPRING HILL', -110, -330], ['NEWSTEAD', 420, -560], ['HERSTON', -120, -640], ['BULIMBA', 820, -60], ['ST LUCIA', -700, 360], ['EAST BRISBANE', 480, 280]];
+    const seen = new Set(), labels = [];
+    for (const s2 of SUBURBS) if (!seen.has(s2[0])) { seen.add(s2[0]); labels.push([s2[0].toUpperCase(), s2[1], s2[2]]); }
     for (const [n, x, z] of labels) { const [a, b] = at(x, z); g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillText(n, a + 1, b + 1); g.fillStyle = '#f2f2f2'; g.fillText(n, a, b); }
     g.font = '600 10px "Barlow Condensed", sans-serif';
     for (const l of World.labels) {
@@ -191,5 +192,6 @@ const HUD = {
     g.fillText('BRISVEGAS', ox + 14, oy + 32);
     g.font = '13px "Barlow Condensed", sans-serif'; g.fillStyle = '#ddd';
     g.fillText('M: close map  ·  yellow M = mission  ·  purple = GPS route', ox + 14, oy + 52);
+    g.font = '12px "Barlow Condensed", sans-serif'; g.fillStyle = '#bbb'; g.fillText('Map data © OpenStreetMap contributors (ODbL)', ox + 14, oy + SH - 12);
   },
 };
